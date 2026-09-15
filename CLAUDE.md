@@ -9,12 +9,83 @@
 
 **DIPROMES** (antes MediTrack Pro) es un sistema de gestión de activos médicos y pacientes para **Dipromes Terapias VAC**, negocio de terapia de compresión/presoterapia en Santo Domingo, República Dominicana. El negocio coloca máquinas terapéuticas en pacientes en domicilio o centros médicos y registra cada colocación con su facturación.
 
-El sistema reemplazó un flujo manual en Excel y está desplegado en producción en Render.com con base de datos PostgreSQL.
+El sistema reemplazó un flujo manual en Excel.
 
-**Estado actual:** Aplicación web full-stack en producción. Backend Flask + PostgreSQL en Render. Frontend HTML+CSS+Vanilla JS en un solo archivo `index.html`.
+> ⚠️ **Este repositorio (`dipromesapp`) es un fork de trabajo** creado el 2026-09-15 a partir de `dipromes` para migrar el hosting de Render.com a **Banahosting** (plan Bana Professional Deluxe Unlimited SSD, cPanel + Python Selector 3.9.23). El repo original `dipromes` **no se toca** — sigue en producción en Render tal cual. Todos los cambios de esta migración (y desarrollo futuro) se hacen aquí.
 
-**URL de producción:** `https://dipromes.onrender.com`
-**Repositorio:** `https://github.com/erickherndza/dipromes`
+**Estado actual:** Código idéntico a `dipromes` al momento del fork (commit `bb62a17`), en proceso de adaptación a cPanel/Passenger. Backend Flask + PostgreSQL. Frontend HTML+CSS+Vanilla JS en un solo archivo `index.html`.
+
+**Repositorio de esta versión (Banahosting):** `https://github.com/erickherndza/dipromesapp`
+**Repositorio original (Render, producción, intacto):** `https://github.com/erickherndza/dipromes` → `https://dipromes.onrender.com`
+
+---
+
+## Migración a Banahosting — plan y guía
+
+### Por qué
+Aprovechar el plan de hosting ya pagado (Bana Professional Deluxe Unlimited SSD) en vez de depender del free tier de Render (que duerme por inactividad), sin arriesgar la producción actual: se trabaja en este repo separado hasta validar que todo funciona igual.
+
+### Diferencias clave vs. `dipromes` (Render)
+
+| Aspecto | `dipromes` (Render) | `dipromesapp` (Banahosting) |
+|---|---|---|
+| Entry point | `wsgi.py` → Gunicorn (`gunicorn wsgi:app`) | `passenger_wsgi.py` → Passenger (variable `application`) |
+| Python | 3.11.0 (`render.yaml`) | 3.9.23 (cPanel Python Selector) — sin sintaxis 3.10+ en el código, compatible |
+| Config de deploy | `render.yaml` | No aplica — todo se configura manualmente en cPanel |
+| Variables de entorno | Dashboard de Render | cPanel → Setup Python App → Environment variables |
+| Base de datos | PostgreSQL gestionado por Render | PostgreSQL Databases en cPanel (crear DB + usuario ahí) |
+| Servidor WSGI en requirements | Gunicorn (usado) | Gunicorn queda en `requirements.txt` pero **no se usa** (Passenger reemplaza su función) — no hace falta quitarlo, solo no correrlo |
+
+`passenger_wsgi.py` ya existe en este repo (raíz), replica la misma lógica de init de BD (`db.create_all()`, `apply_migrations()`, `seed_if_empty()`, `emergency_reset()`) que `wsgi.py`, expuesta como `application`.
+
+### Guía paso a paso — configurar en cPanel
+
+1. **Crear la base de datos PostgreSQL**
+   - cPanel → *PostgreSQL Databases* → crear base + usuario + asignar usuario a la base (todos los privilegios)
+   - Anotar: nombre de base, usuario, password, host (normalmente `localhost`), puerto (`5432`)
+   - Armar el `DATABASE_URL`: `postgresql://usuario:password@localhost:5432/nombre_bd`
+
+2. **Crear la aplicación Python**
+   - cPanel → *Setup Python App* → *Create Application*
+   - Python version: `3.9.23`
+   - Application root: carpeta donde subirás el código (ej. `dipromesapp`)
+   - Application URL: dominio/subdominio a usar
+   - Application startup file: `passenger_wsgi.py`
+   - Application Entry point: `application`
+
+3. **Configurar Environment variables** (mismo panel de Setup Python App)
+   - `SECRET_KEY` — string largo y fijo, distinto al de Render
+   - `DATABASE_URL` — el armado en el paso 1
+   - `ALLOWED_ORIGIN` — dominio final en Banahosting
+   - `ADMIN_PASS`, `DR1_PASS`, `FELI_PASS` — opcional, si quieres contraseñas iniciales distintas a los defaults del código (`dipromes2026`, `doctor123`, `Feli@2026`)
+   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` — opcional, para forgot-password
+
+4. **Subir el código**
+   - Vía Git (cPanel → *Git Version Control* → clonar `https://github.com/erickherndza/dipromesapp.git`) o File Manager
+   - Asegurar que quedan en el root de la app: `index.html`, `passenger_wsgi.py`, `backend/`, `render.yaml` (no molesta, simplemente no se usa)
+
+5. **Instalar dependencias**
+   - Dentro de *Setup Python App*, abrir la terminal/virtualenv de la app (botón provisto por cPanel)
+   - `pip install -r backend/requirements.txt`
+
+6. **Reiniciar la app** desde *Setup Python App* (botón *Restart*) para que tome las env vars y dependencias nuevas
+
+7. **Verificar**
+   - Abrir la URL configurada → debe cargar el login
+   - Probar login con `admin` / `ADMIN_PASS` (o el default `dipromes2026` si no configuraste esa env var)
+   - Revisar que Dashboard, Registros, Máquinas y Consentimiento carguen datos (confirma que `DATABASE_URL` y las migraciones corrieron bien)
+   - Probar una exportación (Excel/CSV) y un login con forgot-password si configuraste SMTP
+
+### Checklist de migración
+- [ ] Base PostgreSQL creada en cPanel
+- [ ] Setup Python App creado (3.9.23, `passenger_wsgi.py`, entry point `application`)
+- [ ] Environment variables cargadas (`SECRET_KEY`, `DATABASE_URL`, `ALLOWED_ORIGIN`, mínimo)
+- [ ] Código subido (Git o File Manager)
+- [ ] `pip install -r backend/requirements.txt` corrido sin errores
+- [ ] App reiniciada y accesible por URL
+- [ ] Login funcional, datos cargando, exportaciones funcionando
+- [ ] (Opcional) Dominio propio apuntando a la app
+- [ ] `dipromes`/Render sigue intacto — no se ha tocado nada allá
 
 ---
 
