@@ -272,11 +272,12 @@ function _handleUnauth(){
   document.querySelector('.app').style.display='none';
 }
 
+const API_BASE = location.pathname.replace(/\/(index\.html)?$/, '');
 const api = {
-  async get(path){ const r=await fetch('/api'+path,{credentials:'same-origin'}); if(r.status===401){_handleUnauth();throw new Error('No autorizado');} if(!r.ok) throw new Error(r.statusText); return r.json(); },
-  async post(path,data){ const r=await fetch('/api'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),credentials:'same-origin'}); if(r.status===401&&path!=='/auth/login'){_handleUnauth();throw new Error('No autorizado');} if(!r.ok) throw new Error(r.statusText); return r.json(); },
-  async put(path,data){ const r=await fetch('/api'+path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),credentials:'same-origin'}); if(r.status===401){_handleUnauth();throw new Error('No autorizado');} if(!r.ok) throw new Error(r.statusText); return r.json(); },
-  async del(path){ const r=await fetch('/api'+path,{method:'DELETE',credentials:'same-origin'}); if(r.status===401){_handleUnauth();throw new Error('No autorizado');} if(!r.ok) throw new Error(r.statusText); return r.json(); },
+  async get(path){ const r=await fetch(API_BASE+'/api'+path,{credentials:'same-origin'}); if(r.status===401){_handleUnauth();throw new Error('No autorizado');} if(!r.ok) throw new Error(r.statusText); return r.json(); },
+  async post(path,data){ const r=await fetch(API_BASE+'/api'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),credentials:'same-origin'}); if(r.status===401&&path!=='/auth/login'){_handleUnauth();throw new Error('No autorizado');} if(!r.ok) throw new Error(r.statusText); return r.json(); },
+  async put(path,data){ const r=await fetch(API_BASE+'/api'+path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),credentials:'same-origin'}); if(r.status===401){_handleUnauth();throw new Error('No autorizado');} if(!r.ok) throw new Error(r.statusText); return r.json(); },
+  async del(path){ const r=await fetch(API_BASE+'/api'+path,{method:'DELETE',credentials:'same-origin'}); if(r.status===401){_handleUnauth();throw new Error('No autorizado');} if(!r.ok) throw new Error(r.statusText); return r.json(); },
 };
 
 async function initDB(){
@@ -345,7 +346,7 @@ function abrirGestionDB(){
 }
 
 function exportarBackupJSON(){
-  window.location.href='/api/exportar/backup';
+  window.location.href=API_BASE+'/api/exportar/backup';
 }
 
 async function importarBackupJSON(){
@@ -1054,7 +1055,7 @@ function filterRegistro(){
   </tr>`).join('')||`<tr><td colspan="11"><div class="empty-state"><i class="ti ti-database-off"></i>Sin resultados</div></td></tr>`;
 }
 
-function exportarRegistro(){window.open('/api/exportar/registros/excel','_blank');}
+function exportarRegistro(){window.open(API_BASE+'/api/exportar/registros/excel','_blank');}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MÁQUINAS (Inventario)
@@ -1334,8 +1335,8 @@ function renderFacturacion(){
   <input type="search" placeholder="Buscar paciente…" value="${_factFiltroPac}"
     style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;flex:1;min-width:160px;background:var(--surface)"
     oninput="_factFiltroPac=this.value;renderFacturacion()">
-  <button class="btn btn-sm" onclick="window.open('/api/exportar/registros/excel','_blank')" title="Exportar Excel"><i class="ti ti-file-spreadsheet"></i> Excel</button>
-  <button class="btn btn-sm" onclick="window.open('/api/exportar/registros/pdf','_blank')" title="Exportar PDF"><i class="ti ti-file-description"></i> PDF</button>
+  <button class="btn btn-sm" onclick="window.open(API_BASE+'/api/exportar/registros/excel','_blank')" title="Exportar Excel"><i class="ti ti-file-spreadsheet"></i> Excel</button>
+  <button class="btn btn-sm" onclick="window.open(API_BASE+'/api/exportar/registros/pdf','_blank')" title="Exportar PDF"><i class="ti ti-file-description"></i> PDF</button>
 </div>
 
 <div style="display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start">
@@ -2350,7 +2351,7 @@ async function guardarYImprimirCons(){
 }
 
 function abrirConsPDF(id){
-  window.open(`/api/consentimientos/${id}/pdf`,'_blank');
+  window.open(`${API_BASE}/api/consentimientos/${id}/pdf`,'_blank');
 }
 
 async function eliminarCons(id){
@@ -2953,7 +2954,7 @@ async function login(){
 
 async function logout(){
   if(!confirm('¿Cerrar sesión?')) return;
-  try{ await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'}); }catch(e){}
+  try{ await fetch(API_BASE+'/api/auth/logout',{method:'POST',credentials:'same-origin'}); }catch(e){}
   sessionStorage.removeItem('meditrack_session');
   document.getElementById('login-screen').style.display='flex';
   document.querySelector('.app').style.display='none';

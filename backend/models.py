@@ -56,7 +56,7 @@ class Registro(db.Model):
     lat = db.Column(db.Float, nullable=True)
     lng = db.Column(db.Float, nullable=True)
     productos = db.Column(db.Text, default='[]')
-    fotos = db.Column(db.Text, default='[]')
+    fotos = db.Column(db.Text(length=4294967295), default='[]')
 
     def to_dict(self):
         return {

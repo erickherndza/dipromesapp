@@ -12,10 +12,17 @@ from flask import Flask, g, request, jsonify, send_from_directory, Response, ses
 from flask_cors import CORS
 from collections import defaultdict
 from time import time
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import generate_password_hash as _werkzeug_generate_password_hash, check_password_hash
 
 from models import db, Maquina, Registro, Usuario, PacienteMaster, Config, Consentimiento
 from exportar import generate_excel, generate_csv, generate_pdf
+
+
+def generate_password_hash(password):
+    # Banahosting's Python 3.9 build lacks hashlib.scrypt (OpenSSL without
+    # scrypt support), which is werkzeug's default hash method. Use pbkdf2
+    # instead — it works everywhere and check_password_hash auto-detects it.
+    return _werkzeug_generate_password_hash(password, method="pbkdf2:sha256")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IS_PROD = bool(os.environ.get("DATABASE_URL"))
@@ -75,13 +82,12 @@ _db_url = os.environ.get(
     "DATABASE_URL",
     f"sqlite:///{os.path.join(BASE_DIR, 'meditrack.db')}"
 )
-if _db_url.startswith("postgres://"):
-    _db_url = _db_url.replace("postgres://", "postgresql+pg8000://", 1)
-elif _db_url.startswith("postgresql://") and "pg8000" not in _db_url:
-    _db_url = _db_url.replace("postgresql://", "postgresql+pg8000://", 1)
+if _db_url.startswith("mysql://"):
+    _db_url = _db_url.replace("mysql://", "mysql+pymysql://", 1)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = _db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True, "pool_recycle": 280}
 db.init_app(app)
 
 
@@ -535,6 +541,7 @@ def importar_backup():
                 notas=m_data.get("notas", ""),
             ))
         count["maquinas"] += 1
+    db.session.commit()
 
     for r_data in d.get("registros", []):
         r = Registro.query.get(r_data["id"])
@@ -551,9 +558,12 @@ def importar_backup():
         else:
             db.session.add(_registro_from_dict(r_data, r_data["id"]))
         count["registros"] += 1
+        if count["registros"] % 10 == 0:
+            db.session.commit()
+    db.session.commit()
 
     for u_data in d.get("usuarios", []):
-        u = Usuario.query.get(u_data["id"])
+        u = Usuario.query.get(u_data["id"]) or Usuario.query.filter_by(user=u_data["user"]).first()
         if u:
             # Never overwrite passwords or credentials of existing users from backup
             pass
@@ -876,15 +886,21 @@ def apply_migrations():
     """ALTER TABLE migrations that db.create_all() cannot handle."""
     with db.engine.connect() as conn:
         try:
-            conn.execute(db.text("ALTER TABLE usuarios ALTER COLUMN pass TYPE TEXT"))
+            conn.execute(db.text("ALTER TABLE usuarios MODIFY COLUMN pass TEXT"))
             conn.commit()
         except Exception:
             conn.rollback()
         try:
-            conn.execute(db.text("ALTER TABLE usuarios ADD COLUMN email TEXT DEFAULT ''"))
+            conn.execute(db.text("ALTER TABLE usuarios ADD COLUMN email VARCHAR(200) DEFAULT ''"))
             conn.commit()
         except Exception:
             conn.rollback()  # Column already exists
+        try:
+            # MySQL's default TEXT caps at 64KB, too small for multi-photo base64 arrays
+            conn.execute(db.text("ALTER TABLE registros MODIFY COLUMN fotos LONGTEXT"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
     # Ensure required users exist (safe: no-op if already present)
     _ensure_user("feli", "Dr. Félix", _FELI_PASS, "usuario")
 
@@ -910,17 +926,8 @@ def seed_if_empty():
     if Registro.query.count() == 0:
         for r in SEED_REGISTROS:
             db.session.add(_registro_from_dict(r, r["id"]))
-    if Usuario.query.count() == 0:
-        db.session.add(Usuario(
-            id="U001", user="admin",
-            pass_=generate_password_hash(_ADMIN_PASS),
-            nombre="Administrador", rol="admin", activo=True,
-        ))
-        db.session.add(Usuario(
-            id="U002", user="dr1",
-            pass_=generate_password_hash(_DR1_PASS),
-            nombre="Dr. Médico", rol="usuario", activo=True,
-        ))
+    _ensure_user("admin", "Administrador", _ADMIN_PASS, "admin")
+    _ensure_user("dr1", "Dr. Médico", _DR1_PASS, "usuario")
     if not Config.query.get("ars"):
         db.session.add(Config(key="ars", value=json.dumps(SEED_ARS, ensure_ascii=False)))
     db.session.commit()

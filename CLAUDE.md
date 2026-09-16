@@ -13,7 +13,9 @@ El sistema reemplazó un flujo manual en Excel.
 
 > ⚠️ **Este repositorio (`dipromesapp`) es un fork de trabajo** creado el 2026-09-15 a partir de `dipromes` para migrar el hosting de Render.com a **Banahosting** (plan Bana Professional Deluxe Unlimited SSD, cPanel + Python Selector 3.9.23). El repo original `dipromes` **no se toca** — sigue en producción en Render tal cual. Todos los cambios de esta migración (y desarrollo futuro) se hacen aquí.
 
-**Estado actual:** Código idéntico a `dipromes` al momento del fork (commit `bb62a17`), en proceso de adaptación a cPanel/Passenger. Backend Flask + PostgreSQL. Frontend HTML+CSS+Vanilla JS en un solo archivo `index.html`.
+**Estado actual:** Código idéntico a `dipromes` al momento del fork (commit `bb62a17`), en proceso de adaptación a cPanel/Passenger. Backend Flask + MySQL (ver nota abajo). Frontend HTML+CSS+Vanilla JS en un solo archivo `index.html`.
+
+> ⚠️ **Cambio de motor de BD (2026-09-15):** el plan original de esta migración asumía PostgreSQL Databases en cPanel (igual que Render), pero el cPanel de Banahosting (plan Bana Professional Deluxe Unlimited SSD) **no ofrece PostgreSQL** — solo MySQL Databases/phpMyAdmin/MySQL Database Wizard. Por eso `dipromesapp` corre sobre **MySQL** (driver `PyMySQL`, pure-Python) mientras que `dipromes` (Render) sigue sobre **PostgreSQL** (driver `pg8000`) sin tocarse. El schema es 100% SQLAlchemy ORM (portable); solo se ajustaron 2 líneas de SQL crudo en `apply_migrations()` (`backend/app.py`) que eran específicas de Postgres.
 
 **Repositorio de esta versión (Banahosting):** `https://github.com/erickherndza/dipromesapp`
 **Repositorio original (Render, producción, intacto):** `https://github.com/erickherndza/dipromes` → `https://dipromes.onrender.com`
@@ -33,17 +35,19 @@ Aprovechar el plan de hosting ya pagado (Bana Professional Deluxe Unlimited SSD)
 | Python | 3.11.0 (`render.yaml`) | 3.9.23 (cPanel Python Selector) — sin sintaxis 3.10+ en el código, compatible |
 | Config de deploy | `render.yaml` | No aplica — todo se configura manualmente en cPanel |
 | Variables de entorno | Dashboard de Render | cPanel → Setup Python App → Environment variables |
-| Base de datos | PostgreSQL gestionado por Render | PostgreSQL Databases en cPanel (crear DB + usuario ahí) |
+| Base de datos | PostgreSQL gestionado por Render | **MySQL Databases en cPanel** (Banahosting no ofrece PostgreSQL — crear DB + usuario ahí) |
+| Driver de BD | `pg8000` (pure Python) | `PyMySQL` (pure Python) |
 | Servidor WSGI en requirements | Gunicorn (usado) | Gunicorn queda en `requirements.txt` pero **no se usa** (Passenger reemplaza su función) — no hace falta quitarlo, solo no correrlo |
 
 `passenger_wsgi.py` ya existe en este repo (raíz), replica la misma lógica de init de BD (`db.create_all()`, `apply_migrations()`, `seed_if_empty()`, `emergency_reset()`) que `wsgi.py`, expuesta como `application`.
 
 ### Guía paso a paso — configurar en cPanel
 
-1. **Crear la base de datos PostgreSQL**
-   - cPanel → *PostgreSQL Databases* → crear base + usuario + asignar usuario a la base (todos los privilegios)
-   - Anotar: nombre de base, usuario, password, host (normalmente `localhost`), puerto (`5432`)
-   - Armar el `DATABASE_URL`: `postgresql://usuario:password@localhost:5432/nombre_bd`
+1. **Crear la base de datos MySQL**
+   - cPanel → *MySQL® Databases* (o *MySQL Database Wizard*) → crear base + usuario + asignar usuario a la base (todos los privilegios)
+   - cPanel antepone el usuario de cPanel al nombre de la base y del usuario de BD (ej. `cpaneluser_dipromes`, `cpaneluser_dipro_admin`) — anotar los nombres exactos que asigna el panel
+   - Anotar: nombre de base, usuario, password, host (normalmente `localhost`), puerto (`3306`)
+   - Armar el `DATABASE_URL`: `mysql://usuario:password@localhost:3306/nombre_bd` (la app lo normaliza internamente a `mysql+pymysql://`)
 
 2. **Crear la aplicación Python**
    - cPanel → *Setup Python App* → *Create Application*
@@ -77,15 +81,63 @@ Aprovechar el plan de hosting ya pagado (Bana Professional Deluxe Unlimited SSD)
    - Probar una exportación (Excel/CSV) y un login con forgot-password si configuraste SMTP
 
 ### Checklist de migración
-- [ ] Base PostgreSQL creada en cPanel
-- [ ] Setup Python App creado (3.9.23, `passenger_wsgi.py`, entry point `application`)
-- [ ] Environment variables cargadas (`SECRET_KEY`, `DATABASE_URL`, `ALLOWED_ORIGIN`, mínimo)
-- [ ] Código subido (Git o File Manager)
-- [ ] `pip install -r backend/requirements.txt` corrido sin errores
-- [ ] App reiniciada y accesible por URL
-- [ ] Login funcional, datos cargando, exportaciones funcionando
-- [ ] (Opcional) Dominio propio apuntando a la app
-- [ ] `dipromes`/Render sigue intacto — no se ha tocado nada allá
+- [x] Base MySQL creada en cPanel
+- [x] Setup Python App creado (3.9.23, `passenger_wsgi.py`, entry point `application`)
+- [x] Environment variables cargadas (`SECRET_KEY`, `DATABASE_URL`, `ALLOWED_ORIGIN`, mínimo)
+- [x] Código subido (Git — clonado en `/home/mybcfcli/dipromesapp`)
+- [x] `pip install -r requirements.txt` corrido sin errores (venv del Python App)
+- [x] App reiniciada y accesible por URL
+- [x] Login funcional, datos cargando (Dashboard con 14 pacientes, 4 activos, 5/8 máquinas, RD$355,500 facturación — datos semilla)
+- [x] Dominio propio apuntando a la app: **`https://dipromes.erickhernandezarias.net`**
+- [x] `dipromes`/Render sigue intacto — no se ha tocado nada allá
+
+### ✅ Deploy funcional (2026-09-15) — URL final: `https://dipromes.erickhernandezarias.net`
+
+**La app quedó corriendo en un subdominio dedicado, NO en `globalistinternational.org/dipromesapp` como se planeó originalmente.** Motivo: `globalistinternational.org` tiene un WordPress en la raíz cuyas reglas de `RewriteRule` en `public_html/.htaccess` interceptaban cualquier ruta que no fuera un archivo/carpeta física (`RewriteCond %{REQUEST_FILENAME} !-f/-d` → `/index.php`), así que todas las llamadas a `/dipromesapp/api/...` devolvían el 404 de WordPress antes de llegar a Passenger/Flask. La carpeta `/dipromesapp/` en sí cargaba bien (por ser directorio real), lo que hizo el diagnóstico confuso al principio. Se decidió (con el usuario) no tocar el WordPress y en vez de eso mover la app a un subdominio limpio.
+
+**Configuración final:**
+- Subdominio: `dipromes.erickhernandezarias.net`, document root propio en `/home/mybcfcli/dipromes.erickhernandezarias.net` (NO comparte docroot con `erickhernandezarias.net` ni `globalistinternational.org`)
+- Setup Python App: mismo Application root `/home/mybcfcli/dipromesapp` (mismo código), Application URL cambiada al subdominio (sin subpath) → `.htaccess` autogenerado con `PassengerBaseURI "/"` (raíz limpia)
+- `erickhernandezarias.net` usa DNS de **Cloudflare** (`jacob.ns.cloudflare.com`/`stephane.ns.cloudflare.com`), no los nameservers de Banahosting — el registro `A` para `dipromes` se creó manualmente en el dashboard de Cloudflare (`dipromes` → `50.31.176.135`, proxy **DNS only**, no proxied) porque crear el subdominio en cPanel no basta cuando el DNS real vive en otro proveedor.
+- SSL: se emitió vía AutoSSL (Let's Encrypt) desde cPanel → SSL/TLS Status → Run AutoSSL, una vez el DNS de Cloudflare ya resolvía. (Un primer intento del usuario instaló un certificado autofirmado por error — no sirve para navegadores, hubo que forzar AutoSSL para reemplazarlo.)
+- `ALLOWED_ORIGIN` actualizado a `https://dipromes.erickhernandezarias.net`
+
+**Bugs de código encontrados y arreglados en esta sesión** (aplicados tanto en local como directamente en el servidor vía terminal/Execute Python Script, luego confirmados idénticos):
+1. **`passenger_wsgi.py` se corrompía al crear/editar la app en Setup Python App** — cPanel sobrescribía el archivo real con un stub genérico que se cargaba a sí mismo (`RecursionError`). Solución final: escribirlo directamente por Terminal con `cat > passenger_wsgi.py << 'EOF'` tecleado (no pegado) — pegar bloques grandes en esa Terminal web los corrompía o colgaba la sesión.
+2. **`hashlib.scrypt` no existe en el Python 3.9 de Banahosting** (OpenSSL sin soporte scrypt) → `generate_password_hash()` de Werkzeug (que usa scrypt por defecto) crasheaba con `AttributeError`. Fix en `backend/app.py`: se envuelve `generate_password_hash` para forzar `method="pbkdf2:sha256"` (líneas ~15-25). Esto es específico de este hosting — no aplica a `dipromes`/Render.
+3. **Bug de orden en el seed inicial**: `apply_migrations()` crea el usuario `feli` (vía `_ensure_user`) *antes* de que `seed_if_empty()` revise `Usuario.query.count() == 0` — en una base de datos nueva, `feli` ya existe para cuando se hace esa revisión, así que `admin`/`dr1` nunca se creaban. Fix: `seed_if_empty()` ahora usa `_ensure_user("admin", ...)` y `_ensure_user("dr1", ...)` en vez del bloque `if count == 0`. Este bug también afectaría a `dipromes`/Render si alguna vez arrancara con una base vacía (nunca ha pasado porque su base tiene meses de datos).
+4. **Frontend (`index.html`) usaba rutas absolutas `/api/...`** asumiendo que la app vive en la raíz del dominio. Se agregó `const API_BASE = location.pathname.replace(/\/(index\.html)?$/, '')` y se prefijaron las ~10 llamadas (`api.get/post/put/del`, exportaciones, logout, PDF de consentimiento) con `API_BASE`. Con la app ahora en la raíz del subdominio esto es un no-op (`API_BASE` = `""`), pero deja la app portable a un subpath en el futuro sin romperse.
+
+**⚠️ Estado del repo:** los fixes de esta sesión (`backend/app.py`, `backend/requirements.txt`, `index.html`, este `CLAUDE.md`) están aplicados en el servidor y en el working tree local, **pero todavía NO se han comiteado ni pusheado a GitHub** — el usuario no ha confirmado. El único commit real pusheado sigue siendo `41138f6` (root `requirements.txt`). Antes de continuar, preguntar si se quiere comitear/pushear el resto.
+
+**Pendiente opcional:**
+- Password de `admin`/`dr1`/`feli` siguen en su default (`dipromes2026` / `doctor123` / `Feli@2026`) — cambiar si se van a usar en producción real, vía `ADMIN_PASS`/`DR1_PASS`/`FELI_PASS` env vars en Setup Python App (requiere borrar el usuario existente o cambiarle el hash manualmente, ya que `_ensure_user` no sobreescribe si ya existe).
+- Probar exportaciones (Excel/PDF) y forgot-password (SMTP) end-to-end.
+- Considerar apuntar un dominio "bonito" propio de Dipromes al subdominio si se quiere algo más profesional que `dipromes.erickhernandezarias.net`.
+
+### ✅ Recuperación de datos reales de producción desde Render — completada (2026-09-16)
+
+La base de datos real de producción (`dipromes-db`, PostgreSQL en Render) había expirado (política de 30 días del plan free) y quedó `Suspended`. El socio del usuario pagó el upgrade a $6/mes, se desbloqueó, se descargó el backup JSON completo desde `dipromes.onrender.com` (87 registros, 16 máquinas, 6 usuarios reales incluyendo `felipeadmin`, 20 pacientes_master — archivo guardado en `/Users/erickhernandez/Desktop/dipromes_backup.json`, ~12MB) y se importó en `https://dipromes.erickhernandezarias.net`.
+
+**Dos bugs reales se encontraron y arreglaron durante el import** (aplicados en local y en el servidor):
+
+1. **`/api/importar/backup` comparaba usuarios solo por `id`, no por `user`** (`backend/app.py`, función `importar_backup`) — como los IDs de usuario en Render (ej. `feli`=`U008`) no coinciden con los IDs ya sembrados en la base nueva (`feli`=`U001`), el import intentaba insertar un `feli` duplicado y violaba el `UNIQUE` de la columna `user`, tumbando **toda la transacción** (nada se importaba). Fix: `Usuario.query.get(u_data["id"]) or Usuario.query.filter_by(user=u_data["user"]).first()`.
+2. **La columna `registros.fotos` era `TEXT` (límite de 64KB en MySQL)** — insuficiente para arrays de fotos en base64 de varios megabytes. MySQL truncaba el valor silenciosamente al insertar (sin lanzar error), dejando JSON inválido que rompía `GET /api/registros` con `JSONDecodeError` al leerlo de vuelta. Fix: `backend/models.py` cambia `fotos` a `db.Text(length=4294967295)` (LONGTEXT), más una migración `ALTER TABLE registros MODIFY COLUMN fotos LONGTEXT` en `apply_migrations()` (`backend/app.py`). Tras ampliar la columna, se re-corrió el mismo import (es idempotente — actualiza por ID) y quedó correcto.
+3. También se agregó `SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 280}` y **commits periódicos cada 10 registros** dentro de `importar_backup()` (en vez de un solo commit al final), porque el primer intento de import falló con `MySQL server has gone away` a mitad de proceso — la petición de 12MB tardaba lo suficiente como para que la conexión se cayera antes de terminar.
+
+**⚠️ Corrección importante — datos semilla contaminando el total:** el primer import "exitoso" (41 pacientes, RD$840,512) en realidad tenía los **datos de semilla/demo** (`SEED_REGISTROS`/`SEED_MAQUINAS`, incluye al paciente ficticio "Dr. Felix Batista" en "Maquina No. 1") sumados encima de los datos reales importados — nunca se limpió la base antes de importar, así que ambos coexistían como filas separadas (IDs distintos, sin colisión) e inflaban los totales del dashboard. El usuario lo detectó comparando visualmente el dashboard de Render vs el nuevo.
+
+**Fix:** `POST /api/db/reset` con `{"reseed": false}` (borra `registros`, `maquinas`, `pacientes_master` — **conserva** `usuarios`/`Config`) y luego se re-corrió el mismo import sobre la base ya limpia.
+
+**Resultado final confirmado (coincide exactamente con Render):** Dashboard en `https://dipromes.erickhernandezarias.net` muestra **27 pacientes únicos, 17 activos, 16/8 máquinas operativas, RD$485,012** en facturación — mismos números y mismo primer paciente activo ("Angel Sarante") que el dashboard real de `dipromes.onrender.com`.
+
+**El import se hizo vía `curl` directo desde la Mac del usuario** (no por el navegador) porque el archivo de backup (~12MB) supera el límite de 10MB de la herramienta de upload de Claude in Chrome:
+```bash
+curl -c cookies.txt -X POST https://dipromes.erickhernandezarias.net/api/auth/login -H "Content-Type: application/json" -d '{"user":"admin","pass":"dipromes2026"}'
+curl -b cookies.txt -X POST https://dipromes.erickhernandezarias.net/api/importar/backup -H "Content-Type: application/json" --data-binary @/ruta/al/backup.json
+```
+
+**Pendiente opcional:** una vez confirmado que todo está bien, avisar al usuario que puede eliminar `dipromes-db` y el servicio web `dipromes` en Render para no seguir pagando el mes siguiente.
 
 ---
 
@@ -96,8 +148,8 @@ Aprovechar el plan de hosting ya pagado (Bana Professional Deluxe Unlimited SSD)
 | Frontend | HTML + CSS + Vanilla JS | Un solo archivo `index.html` |
 | Backend | Python 3.11 + Flask | `backend/app.py` |
 | ORM | SQLAlchemy (Flask-SQLAlchemy 3.1) | Modelos en `backend/models.py` |
-| Base de datos | SQLite (dev local) → PostgreSQL (Render) | Driver: `pg8000` (pure Python, sin C) |
-| Hosting | Render.com (free tier) | `render.yaml` + `wsgi.py` |
+| Base de datos | SQLite (dev local) → **MySQL** (Banahosting, este repo) | Driver: `PyMySQL` (pure Python, sin C). `dipromes`/Render usa PostgreSQL + `pg8000` |
+| Hosting | Banahosting (cPanel + Passenger) — este repo | `passenger_wsgi.py`. `dipromes`/Render usa `render.yaml` + `wsgi.py` |
 | Servidor WSGI | Gunicorn 22 | 2 workers, timeout 60s |
 | Íconos | Tabler Icons (webfont CDN) | `ti ti-*` |
 | Colores de marca | Crimson `#7B1A1A`, Negro `#1A1A1A`, Blanco `#FFFFFF` | Paleta EHA |
@@ -145,7 +197,7 @@ Resumen de facturación y saldos pendientes por paciente.
 
 ### 7. Consentimiento Informado
 - Módulo en sidebar: **Documentos → Consentimiento**
-- Tabla `consentimientos` en PostgreSQL
+- Tabla `consentimientos` en la base de datos (MySQL en este repo, PostgreSQL en `dipromes`/Render)
 - Pestaña **Registros guardados**: listado de consentimientos con estado Firmado/Pendiente, botones Imprimir y Eliminar
 - Pestaña **Nuevo consentimiento**: formulario con autocompletar desde pacientes existentes, campos: nombre, cédula, edad, dirección, teléfono, médico, centro de salud, fecha firma, firmado (checkbox), notas
 - `GET /api/consentimientos/<id>/pdf` → genera HTML A4 server-side (sin reportlab), fiel al documento `consentimiento-VAC.docx` original
@@ -335,6 +387,25 @@ async function renderNuevo(){ ... }
 // 5. handleNuevo()
 ({..., nuevo: ()=>accionNuevo()})[VIEW]?.()
 ```
+
+---
+
+## Lista de cambios solicitados (verificada 2026-09-15)
+
+El usuario pasó una lista de 8 cambios deseados. Se verificó contra el código real (no contra CLAUDE.md/documentación) cuáles ya están implementados:
+
+| # | Cambio | Estado | Evidencia |
+|---|--------|--------|-----------|
+| 1 | "Colocaciones" debe mostrar solo pacientes con máquina activa | ✅ Implementado | `renderColocaciones`/`filterColocaciones` (`index.html:876-938`) filtran estrictamente `estatus==='Activo'` |
+| 2 | "Parámetros de configuración del equipo" en incrementos de 25 (100→300) | ✅ Implementado | `parametrosOpts()` (`index.html:471-475`): `[100,125,150,175,200,225,250,275,300]`, ya es un `<select>`, no texto libre |
+| 3 | "Próxima visita" integrada con Google Calendar | ❌ No implementado | Es solo `<input type="date">` con alerta en dashboard si faltan ≤7 días (`index.html:663`). Sin API, sin `.ics`, sin link "agregar a calendario" |
+| 4 | Quitar campos "máquina" y "área de lesión" al registrar una próxima colocación (paciente ya existente) | ❌ No implementado | Un solo formulario `abrirColocacion()` (`index.html:1475-1568`) se usa tanto para el primer registro como para colocaciones siguientes — siempre incluye `col-maq` y `col-lesion` |
+| 5 | Fotos de evidencia a carpeta individual de Google Drive | ❌ No implementado | Sin ninguna referencia a Drive/Cloudinary/OAuth en el código. Fotos siguen como base64 en la columna `fotos` (Text) de MySQL — coincide con el roadmap ya documentado abajo |
+| 6 | Poder indicar a qué colocación pertenecen las fotos subidas | ✅ Implementado | Flujo dedicado "Subir fotos" (`abrirSubirFotos()`, `index.html:2708-2762`) obliga a elegir paciente y luego la colocación específica antes de adjuntar fotos |
+| 7 | Poder editar una colocación después de registrada | ✅ Implementado | `abrirEditarColocacion()`/`guardarEditarColocacion()` (`index.html:1659-1771`) — modal completo, botón lápiz en varias vistas de lista |
+| 8 | Asignar máquina a un paciente recién registrado sin que cuente como nueva colocación | ✅ Implementado | `abrirAsignarEquipo()`/`guardarAsignarEquipo()` (`index.html:1985-2148`) actualiza el mismo registro existente en vez de crear uno nuevo (comentario explícito en el código, línea ~2122) cuando el paciente ya tiene un registro activo sin máquina |
+
+**Pendiente para mañana (2026-09-16 o cuando aplique):** implementar los puntos **#3, #4 y #5**, condicionado a que el usuario conecte una cuenta de Google (Calendar API para #3, Drive API para #5 — ambas requieren OAuth2 + credenciales de Google Cloud Console). El punto #4 es un cambio de formulario puro (no depende de Google) y se puede hacer independientemente si se prefiere adelantarlo.
 
 ---
 
