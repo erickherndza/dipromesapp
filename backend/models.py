@@ -57,6 +57,7 @@ class Registro(db.Model):
     lng = db.Column(db.Float, nullable=True)
     productos = db.Column(db.Text, default='[]')
     fotos = db.Column(db.Text(length=4294967295), default='[]')
+    google_event_id = db.Column(db.String(100), default='')
 
     def to_dict(self):
         return {
@@ -90,6 +91,7 @@ class Registro(db.Model):
             'lng': self.lng,
             'productos': json.loads(self.productos or '[]'),
             'fotos': json.loads(self.fotos or '[]'),
+            'google_event_id': self.google_event_id or '',
         }
 
 

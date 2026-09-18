@@ -390,22 +390,43 @@ async function renderNuevo(){ ... }
 
 ---
 
-## Lista de cambios solicitados (verificada 2026-09-15)
+## Lista de cambios solicitados (verificada 2026-09-15, actualizada 2026-09-18)
 
-El usuario pasó una lista de 8 cambios deseados. Se verificó contra el código real (no contra CLAUDE.md/documentación) cuáles ya están implementados:
+El usuario pasó una lista de 8 cambios deseados. Estado final tras la sesión del 2026-09-18:
 
 | # | Cambio | Estado | Evidencia |
 |---|--------|--------|-----------|
 | 1 | "Colocaciones" debe mostrar solo pacientes con máquina activa | ✅ Implementado | `renderColocaciones`/`filterColocaciones` (`index.html:876-938`) filtran estrictamente `estatus==='Activo'` |
 | 2 | "Parámetros de configuración del equipo" en incrementos de 25 (100→300) | ✅ Implementado | `parametrosOpts()` (`index.html:471-475`): `[100,125,150,175,200,225,250,275,300]`, ya es un `<select>`, no texto libre |
-| 3 | "Próxima visita" integrada con Google Calendar | ❌ No implementado | Es solo `<input type="date">` con alerta en dashboard si faltan ≤7 días (`index.html:663`). Sin API, sin `.ics`, sin link "agregar a calendario" |
-| 4 | Quitar campos "máquina" y "área de lesión" al registrar una próxima colocación (paciente ya existente) | ❌ No implementado | Un solo formulario `abrirColocacion()` (`index.html:1475-1568`) se usa tanto para el primer registro como para colocaciones siguientes — siempre incluye `col-maq` y `col-lesion` |
-| 5 | Fotos de evidencia a carpeta individual de Google Drive | ❌ No implementado | Sin ninguna referencia a Drive/Cloudinary/OAuth en el código. Fotos siguen como base64 en la columna `fotos` (Text) de MySQL — coincide con el roadmap ya documentado abajo |
-| 6 | Poder indicar a qué colocación pertenecen las fotos subidas | ✅ Implementado | Flujo dedicado "Subir fotos" (`abrirSubirFotos()`, `index.html:2708-2762`) obliga a elegir paciente y luego la colocación específica antes de adjuntar fotos |
-| 7 | Poder editar una colocación después de registrada | ✅ Implementado | `abrirEditarColocacion()`/`guardarEditarColocacion()` (`index.html:1659-1771`) — modal completo, botón lápiz en varias vistas de lista |
-| 8 | Asignar máquina a un paciente recién registrado sin que cuente como nueva colocación | ✅ Implementado | `abrirAsignarEquipo()`/`guardarAsignarEquipo()` (`index.html:1985-2148`) actualiza el mismo registro existente en vez de crear uno nuevo (comentario explícito en el código, línea ~2122) cuando el paciente ya tiene un registro activo sin máquina |
+| 3 | "Próxima visita" integrada con Google Calendar | ✅ Implementado (código) — falta configurar `GOOGLE_CLIENT_ID` | Checkbox "Sincronizar con Google Calendar" en `abrirColocacion`/`abrirEditarColocacion`/`abrirAsignarEquipo` → `sincronizarEventoCalendar()` (`index.html`, sección "INTEGRACIÓN GOOGLE"). Ver sección dedicada abajo |
+| 4 | Quitar campos "máquina" y "área de lesión" al registrar una próxima colocación (paciente ya existente) | ✅ Implementado | `onPacChange()` (`index.html:493-`) oculta `col-maq-wrap`/`col-lesion-wrap` y autocompleta ambos valores (máquina activa o última usada, lesión de la última colocación) cuando el paciente ya tiene colocaciones previas |
+| 5 | Fotos de evidencia a carpeta individual de Google Drive | ✅ Implementado (código) — falta configurar `GOOGLE_CLIENT_ID` | Checkbox en el flujo "Subir fotos" (`abrirSubirFotos`) → `obtenerOCrearCarpetaDrivePaciente()` + `subirFotoADrive()`. Carpeta raíz "Dipromes - Fotos" con subcarpeta por paciente. Ver sección dedicada abajo |
+| 6 | Poder indicar a qué colocación pertenecen las fotos subidas | ✅ Implementado | Flujo dedicado "Subir fotos" (`abrirSubirFotos()`) obliga a elegir paciente y luego la colocación específica antes de adjuntar fotos |
+| 7 | Poder editar una colocación después de registrada | ✅ Implementado | `abrirEditarColocacion()`/`guardarEditarColocacion()` — modal completo, botón lápiz en varias vistas de lista |
+| 8 | Asignar máquina a un paciente recién registrado sin que cuente como nueva colocación | ✅ Implementado | `abrirAsignarEquipo()`/`guardarAsignarEquipo()` actualiza el mismo registro existente en vez de crear uno nuevo cuando el paciente ya tiene un registro activo sin máquina |
 
-**Pendiente para mañana (2026-09-16 o cuando aplique):** implementar los puntos **#3, #4 y #5**, condicionado a que el usuario conecte una cuenta de Google (Calendar API para #3, Drive API para #5 — ambas requieren OAuth2 + credenciales de Google Cloud Console). El punto #4 es un cambio de formulario puro (no depende de Google) y se puede hacer independientemente si se prefiere adelantarlo.
+---
+
+## Integración con Google Calendar y Google Drive (2026-09-18)
+
+**Decisión de arquitectura (elegida por el usuario):** OAuth2 en el navegador vía **Google Identity Services** (`initTokenClient`), NO OAuth de servidor con refresh token. Motivo: el backend corre en cPanel/Passenger (sin sesión de navegador propia) — guardar un refresh token permanente ahí implicaría manejar un secreto sensible en el servidor. Con OAuth en el navegador, cada persona en la oficina autoriza una vez por sesión (popup de Google) usando la cuenta **`dipromesterapiadevac@gmail.com`**, y el access token vive solo en memoria del navegador (nunca se persiste). No se guarda ningún secreto de Google en el servidor — solo un **Client ID**, que es público por diseño.
+
+**Qué se implementó:**
+- `backend/app.py`: CSP ampliado (`script-src`/`connect-src`/`img-src`) para permitir `accounts.google.com`, `www.googleapis.com`, `oauth2.googleapis.com`, `*.googleusercontent.com`. Endpoint `GET /api/config/google-client-id` (expone `GOOGLE_CLIENT_ID` env var al frontend). `PUT /api/config/<key>` ahora permite a cualquier usuario logueado (no solo admin) escribir claves que empiecen con `google_` (para cachear el ID de la carpeta raíz de Drive).
+- `backend/models.py`: campo nuevo `Registro.google_event_id` (guarda el ID del evento de Calendar vinculado a esa colocación, para poder actualizarlo/borrarlo después). Migración correspondiente en `apply_migrations()`.
+- `index.html`: sección "INTEGRACIÓN GOOGLE (Calendar / Drive)" con `ensureGoogleAuth()` (token client), `sincronizarEventoCalendar()` (crea/actualiza/borra el evento en el calendario primario de la cuenta autorizada según el campo "Próxima visita estimada"), `obtenerOCrearCarpetaDriveRaiz()`/`obtenerOCrearCarpetaDrivePaciente()` (carpeta "Dipromes - Fotos" → subcarpeta por paciente, IDs cacheados en `Config`/`pacientes_master`), `subirFotoADrive()` (upload multipart + permiso de lectura por link). El array `fotos` de un registro ahora puede mezclar strings base64 (legado) y objetos `{driveId, driveViewLink, driveThumbLink, nombre}` — `renderGaleriaFotos`, `crearFotoThumb` y `getFotosFromPreview` manejan ambos tipos.
+- El checkbox "Sincronizar con Google Calendar" aparece en los 3 formularios que tienen "Próxima visita estimada" (`abrirColocacion`, `abrirEditarColocacion`, `abrirAsignarEquipo`). El checkbox "Guardar en Google Drive" solo está en el flujo dedicado "Subir fotos" (que ya obliga a elegir paciente + colocación, por el punto #6) — el upload rápido de fotos dentro del formulario de colocación sigue usando base64 sin cambios.
+- Si `GOOGLE_CLIENT_ID` no está configurado, ambos checkboxes se reemplazan por un texto informativo y el resto de la app sigue funcionando exactamente igual (feature 100% opcional/aditiva).
+
+**⚠️ Pendiente para activarlo — requiere que el usuario cree credenciales en Google Cloud Console:**
+1. Entrar a [console.cloud.google.com](https://console.cloud.google.com) con la cuenta `dipromesterapiadevac@gmail.com` y crear un proyecto nuevo (ej. "Dipromes App").
+2. *APIs & Services → Library* → habilitar **Google Calendar API** y **Google Drive API**.
+3. *APIs & Services → OAuth consent screen* → tipo **External** (o Internal si la cuenta fuera Workspace, no lo es), agregar `dipromesterapiadevac@gmail.com` como usuario de prueba si queda en modo "Testing" (suficiente para uso interno; no hace falta publicarla para verificación de Google).
+4. *APIs & Services → Credentials → Create Credentials → OAuth client ID* → tipo **Web application**. En **Authorized JavaScript origins** agregar `https://dipromes.erickhernandezarias.net`. NO hace falta redirect URI (el flujo de token client no la usa).
+5. Copiar el **Client ID** generado (termina en `.apps.googleusercontent.com`) y agregarlo en cPanel → *Setup Python App* → Environment variables → `GOOGLE_CLIENT_ID` → Restart.
+6. Probar: abrir una colocación, tildar "Sincronizar con Google Calendar", guardar → debe aparecer un popup de Google pidiendo iniciar sesión (usar `dipromesterapiadevac@gmail.com`) y aceptar permisos de Calendar/Drive. Verificar que el evento aparece en `calendar.google.com` y que la carpeta "Dipromes - Fotos" aparece en el Drive de esa cuenta.
+
+**No requiere tocar nada en el repo `dipromes` (Render)** — esta integración es específica de `dipromesapp`.
 
 ---
 

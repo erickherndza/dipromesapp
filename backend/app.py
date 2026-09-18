@@ -50,11 +50,11 @@ def add_security_headers(resp):
         resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     csp = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://accounts.google.com; "
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
         "font-src 'self' https://cdn.jsdelivr.net data:; "
-        "img-src 'self' https://*.tile.openstreetmap.org https://unpkg.com data: blob:; "
-        "connect-src 'self'; "
+        "img-src 'self' https://*.tile.openstreetmap.org https://unpkg.com https://*.googleusercontent.com data: blob:; "
+        "connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com; "
         "object-src 'none'; "
         "base-uri 'self'; "
         "frame-ancestors 'none';"
@@ -322,6 +322,7 @@ def _registro_from_dict(d, reg_id):
         observaciones_retiro=d.get("observaciones_retiro", ""),
         productos=json.dumps(d.get("productos", [])),
         fotos=json.dumps(d.get("fotos", [])),
+        google_event_id=d.get("google_event_id", ""),
     )
 
 
@@ -367,7 +368,7 @@ def update_registro(id):
               "facturacion", "saldo_pendiente", "lat", "lng", "modo_uso",
               "condicion_salida", "condicion_retorno", "parametros", "notas",
               "proxima_colocacion", "notas_seguimiento", "fecha_retiro",
-              "observaciones_retiro"):
+              "observaciones_retiro", "google_event_id"):
         if f in d:
             setattr(r, f, d[f])
     if "productos" in d:
@@ -550,7 +551,7 @@ def importar_backup():
                       "tel1","tel2","dr_refiere","ars","maquina","estatus","motivo",
                       "facturacion","modo_uso","condicion_salida","condicion_retorno",
                       "parametros","notas","proxima_colocacion","notas_seguimiento",
-                      "fecha_retiro","observaciones_retiro"):
+                      "fecha_retiro","observaciones_retiro","google_event_id"):
                 if f in r_data:
                     setattr(r, f, r_data[f])
             r.productos = json.dumps(r_data.get("productos", []))
@@ -682,6 +683,14 @@ def exportar_maquinas_excel():
     )
 
 
+# ─── Google (Calendar / Drive) — client-side OAuth config ────────────────────
+
+@app.route("/api/config/google-client-id")
+@login_required
+def get_google_client_id():
+    return jsonify({"client_id": os.environ.get("GOOGLE_CLIENT_ID", "")})
+
+
 # ─── Config (ARS list, etc.) ──────────────────────────────────────────────────
 
 @app.route("/api/config/<key>")
@@ -694,8 +703,10 @@ def get_config(key):
 
 
 @app.route("/api/config/<key>", methods=["PUT"])
-@admin_required
+@login_required
 def set_config(key):
+    if not key.startswith("google_") and session.get("rol") != "admin":
+        return jsonify({"error": "Se requiere rol de administrador"}), 403
     c = Config.query.get(key)
     payload = json.dumps(request.json, ensure_ascii=False)
     if c:
@@ -901,6 +912,11 @@ def apply_migrations():
             conn.commit()
         except Exception:
             conn.rollback()
+        try:
+            conn.execute(db.text("ALTER TABLE registros ADD COLUMN google_event_id VARCHAR(100) DEFAULT ''"))
+            conn.commit()
+        except Exception:
+            conn.rollback()  # Column already exists
     # Ensure required users exist (safe: no-op if already present)
     _ensure_user("feli", "Dr. Félix", _FELI_PASS, "usuario")
 

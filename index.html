@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -281,18 +282,25 @@ const api = {
 };
 
 async function initDB(){
-  const [maq,reg,pm,usr,ars] = await Promise.all([
+  const [maq,reg,pm,usr,ars,gcid] = await Promise.all([
     api.get('/maquinas'),
     api.get('/registros'),
     api.get('/pacientes-master'),
     api.get('/usuarios'),
     api.get('/config/ars'),
+    api.get('/config/google-client-id'),
   ]);
   DB.maquinas = maq;
   DB.registros = reg;
   DB.pacientes_master = pm;
   DB.usuarios = usr;
   DB.ars = ars || ['Privado','ARS Humano','ARS Senasa','ARS Universal','Otro'];
+  DB.googleClientId = (gcid&&gcid.client_id)||'';
+  DB.googleDriveRootId = '';
+  try{
+    const driveRoot = await api.get('/config/google_drive_root');
+    DB.googleDriveRootId = (driveRoot&&driveRoot.folderId)||'';
+  }catch(e){/* aún no se ha creado la carpeta raíz en Drive */}
   recalcPacienteActual();
 }
 
@@ -468,6 +476,18 @@ function arsOpts(selected=''){
 }
 
 const ARS_PUBLICAS = ['Senasa Subsidiado','Senasa Contributivo','Semma'];
+function googleCalCheckboxHtml(id){
+  if(!DB.googleClientId) return `<div style="font-size:10px;color:var(--text3);margin-top:6px">Integración con Google Calendar no configurada.</div>`;
+  return `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);margin-top:6px;cursor:pointer">
+    <input type="checkbox" id="${id}" checked><i class="ti ti-brand-google" style="font-size:13px"></i>Sincronizar con Google Calendar
+  </label>`;
+}
+function googleDriveCheckboxHtml(id){
+  if(!DB.googleClientId) return `<div style="font-size:10px;color:var(--text3);margin-top:4px">Integración con Google Drive no configurada.</div>`;
+  return `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);margin-top:6px;cursor:pointer">
+    <input type="checkbox" id="${id}" checked><i class="ti ti-brand-google-drive" style="font-size:13px"></i>Guardar estas fotos en la carpeta del paciente en Google Drive
+  </label>`;
+}
 function parametrosOpts(selected=''){
   const vals=[100,125,150,175,200,225,250,275,300];
   return `<option value="">— Seleccionar presión —</option>` +
@@ -492,14 +512,20 @@ function arsOptsGrouped(selected=''){
 
 function onPacChange(){
   const nombre=(document.getElementById('col-pac')||{}).value;
-  if(!nombre||nombre==='__nuevo__') return;
+  const maqWrap=document.getElementById('col-maq-wrap');
+  const lesionWrap=document.getElementById('col-lesion-wrap');
+  if(!nombre||nombre==='__nuevo__'){
+    if(maqWrap) maqWrap.style.display='';
+    if(lesionWrap) lesionWrap.style.display='';
+    return;
+  }
   const p=getPacientesUnicos().find(x=>x.nombre===nombre);
   if(!p) return;
   const arsEl=document.getElementById('col-ars');
   if(arsEl&&p.ars) arsEl.value=p.ars;
   const numEl=document.getElementById('col-num');
+  const total=p.colocaciones.length;
   if(numEl){
-    const total=p.colocaciones.length;
     if(total>0){
       const etiquetas=['1era','2da','3era','4ta','5ta','6ta','7ma','8va','9na','10ma'];
       numEl.value=(etiquetas[total]||`${total+1}ra`)+' Colocacion';
@@ -510,6 +536,28 @@ function onPacChange(){
       numEl.readOnly=false;
       numEl.style.background='';
     }
+  }
+  // Próxima colocación de un paciente existente: la máquina y el área de
+  // lesión ya quedaron fijadas desde el primer registro, no se vuelven a pedir.
+  if(total>0){
+    const ultima=[...p.colocaciones].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))[total-1];
+    const activa=p.colocaciones.find(r=>r.estatus==='Activo'&&r.maquina);
+    const maqEl=document.getElementById('col-maq');
+    const maqId=(activa?activa.maquina:ultima.maquina)||'';
+    if(maqEl){
+      if(maqId&&!maqEl.querySelector(`option[value="${maqId}"]`)){
+        const m=DB.maquinas.find(x=>x.id===maqId);
+        maqEl.insertAdjacentHTML('beforeend',`<option value="${maqId}">${m?m.nombre:maqId}</option>`);
+      }
+      maqEl.value=maqId;
+    }
+    const lesionEl=document.getElementById('col-lesion');
+    if(lesionEl) lesionEl.value=ultima.lesion||'';
+    if(maqWrap) maqWrap.style.display='none';
+    if(lesionWrap) lesionWrap.style.display='none';
+  }else{
+    if(maqWrap) maqWrap.style.display='';
+    if(lesionWrap) lesionWrap.style.display='';
   }
 }
 
@@ -1490,13 +1538,13 @@ function abrirColocacion(nombrePreset){
     </div>
     <div class="form-group"><label>Fecha *</label><input type="date" id="col-fecha" value="${new Date().toISOString().split('T')[0]}"></div>
     <div class="form-group"><label>N° Colocación</label><input type="text" id="col-num" placeholder="1era Colocacion"></div>
-    <div class="form-group"><label>Máquina a asignar</label>
+    <div class="form-group" id="col-maq-wrap"><label>Máquina a asignar</label>
       <select id="col-maq">
         <option value="">Sin máquina asignada</option>
         ${maqDisp.map(m=>`<option value="${m.id}">${m.nombre} (Serial: ${m.serial||'—'})</option>`).join('')}
       </select>
     </div>
-    <div class="form-group"><label>Área de lesión</label><input type="text" id="col-lesion" placeholder="Pierna Derecha, Pecho..."></div>
+    <div class="form-group" id="col-lesion-wrap"><label>Área de lesión</label><input type="text" id="col-lesion" placeholder="Pierna Derecha, Pecho..."></div>
     <div class="form-group"><label>Dirección / Centro</label><input type="text" id="col-dir" placeholder="Hospital, domicilio..."></div>
     <div class="form-group"><label>Teléfono</label><input type="text" id="col-tel" placeholder="809-000-0000"></div>
     <div class="form-group"><label>ARS / Seguro</label>
@@ -1524,7 +1572,7 @@ function abrirColocacion(nombrePreset){
     </div>
     <div class="form-group span2"><label>Notas / observaciones clínicas</label><textarea id="col-notas" placeholder="Estado del paciente, indicaciones especiales, seguimiento..."></textarea></div>
     <div class="section-divider">Seguimiento</div>
-    <div class="form-group"><label>Próxima visita estimada</label><input type="date" id="col-proxima"></div>
+    <div class="form-group"><label>Próxima visita estimada</label><input type="date" id="col-proxima">${googleCalCheckboxHtml('col-gcal')}</div>
     <div class="section-divider">Ubicación GPS</div>
     <div class="form-group span2">
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">
@@ -1565,6 +1613,7 @@ function abrirColocacion(nombrePreset){
 </div>
 </div>`;
   setTimeout(initMiniMapa, 80);
+  if(nombrePreset) onPacChange();
 }
 
 let _miniMap=null, _miniMarker=null;
@@ -1643,12 +1692,16 @@ async function guardarColocacion(){
     fotos:getFotosFromPreview('col-foto-preview'),
     fecha_retiro:null,condicion_retorno:'',observaciones_retiro:'',
   };
+  let creado;
   try{
-    const creado=await api.post('/registros',nuevo);
+    creado=await api.post('/registros',nuevo);
     DB.registros.push(creado);
     if(maqId){const m=DB.maquinas.find(x=>x.id===maqId);if(m)m.paciente_actual=pac;}
     showToast('Colocación guardada');
   }catch(e){showToast('Error al guardar: '+e.message,true);return;}
+  if(creado.proxima_colocacion && document.getElementById('col-gcal')?.checked){
+    await sincronizarEventoCalendar(creado);
+  }
   closeModal();
   ({dashboard:renderDash,pacientes:renderPacientes,colocaciones:renderColocaciones,registro:renderRegistro,maquinas:renderMaquinas})[VIEW]?.();
 }
@@ -1700,7 +1753,7 @@ function abrirEditarColocacion(id){
     </div>
     <div class="form-group span2"><label>Notas / observaciones clínicas</label><textarea id="ec2-notas">${esc(reg.notas)||''}</textarea></div>
     <div class="section-divider">Seguimiento</div>
-    <div class="form-group"><label>Próxima visita estimada</label><input type="date" id="ec2-proxima" value="${reg.proxima_colocacion||''}"></div>
+    <div class="form-group"><label>Próxima visita estimada</label><input type="date" id="ec2-proxima" value="${reg.proxima_colocacion||''}">${googleCalCheckboxHtml('ec2-gcal')}</div>
     <div class="section-divider">Retiro</div>
     <div class="form-group"><label>Estado</label>
       <select id="ec2-estatus">
@@ -1759,13 +1812,17 @@ async function guardarEditarColocacion(id){
     productos:getProductosFromList('ec2-productos-list'),
     fotos:getFotosFromPreview('ec2-foto-preview'),
   };
+  let actualizado;
   try{
-    const actualizado=await api.put('/registros/'+id,cambios);
+    actualizado=await api.put('/registros/'+id,cambios);
     const idx=DB.registros.findIndex(r=>r.id===id);
     if(idx>-1) DB.registros[idx]=actualizado;
     recalcPacienteActual();
     showToast('Colocación actualizada');
   }catch(e){showToast('Error: '+e.message,true);return;}
+  if(document.getElementById('ec2-gcal')?.checked){
+    await sincronizarEventoCalendar(actualizado);
+  }
   closeModal();
   ({dashboard:renderDash,pacientes:renderPacientes,colocaciones:renderColocaciones,registro:renderRegistro,maquinas:renderMaquinas,facturacion:renderFacturacion})[VIEW]?.();
 }
@@ -2061,7 +2118,7 @@ function abrirAsignarEquipo(nombre){
     </div>
     <div class="form-group span2"><label>Notas / observaciones clínicas</label><textarea id="aeq-notas" placeholder="Estado del paciente, indicaciones especiales, seguimiento..."></textarea></div>
     <div class="section-divider">Seguimiento</div>
-    <div class="form-group"><label>Próxima visita estimada</label><input type="date" id="aeq-proxima"></div>
+    <div class="form-group"><label>Próxima visita estimada</label><input type="date" id="aeq-proxima">${googleCalCheckboxHtml('aeq-gcal')}</div>
     <div class="section-divider">Productos utilizados</div>
     <div class="form-group span2">
       <div id="aeq-productos-list"></div>
@@ -2118,6 +2175,7 @@ async function guardarAsignarEquipo(nombre){
     productos:getProductosFromList('aeq-productos-list'),
     fotos:getFotosFromPreview('aeq-foto-preview'),
   };
+  let registroGuardado;
   try{
     if(activeReg && !activeReg.maquina){
       // Ya existe el registro de este paciente (creado al registrarlo) sin máquina aún:
@@ -2125,6 +2183,7 @@ async function guardarAsignarEquipo(nombre){
       const actualizado=await api.put('/registros/'+activeReg.id,campos);
       const idx=DB.registros.findIndex(r=>r.id===activeReg.id);
       if(idx>-1) DB.registros[idx]=actualizado;
+      registroGuardado=actualizado;
     }else{
       const nuevo={
         ...campos,nombre,
@@ -2139,10 +2198,14 @@ async function guardarAsignarEquipo(nombre){
       // esto sí es una colocación nueva de verdad.
       const creado=await api.post('/registros',nuevo);
       DB.registros.push(creado);
+      registroGuardado=creado;
     }
     if(maqId){const m=DB.maquinas.find(x=>x.id===maqId);if(m)m.paciente_actual=nombre;}
     showToast(activeReg&&!activeReg.maquina?'Equipo asignado':'Colocación registrada');
   }catch(e){showToast('Error: '+e.message,true);return;}
+  if(registroGuardado.proxima_colocacion && document.getElementById('aeq-gcal')?.checked){
+    await sincronizarEventoCalendar(registroGuardado);
+  }
   closeModal();
   ({dashboard:renderDash,pacientes:renderPacientes,colocaciones:renderColocaciones,registro:renderRegistro,maquinas:renderMaquinas})[VIEW]?.();
 }
@@ -2652,40 +2715,76 @@ function renderProductosEnHistorial(productos){
 function agregarFotosSection(modalPrefix){
   // Called after modal opens — injects fotos section if container exists
 }
-function crearFotoThumb(previewId, b64){
+function crearFotoThumb(previewId, foto){
   const preview=document.getElementById(previewId);if(!preview)return;
   const wrap=document.createElement('div');
   wrap.className='foto-thumb-wrap';
-  const img=document.createElement('img');
-  img.src=b64;
-  img.className='foto-thumb';
-  img.dataset.b64=b64;
-  img.onclick=()=>abrirLightbox(b64);
+  wrap.style.position='relative';
+  wrap.dataset.raw=JSON.stringify(foto);
+  const esDrive=foto&&typeof foto==='object'&&foto.driveViewLink;
+  let visual;
+  if(esDrive&&foto.driveThumbLink){
+    visual=document.createElement('img');
+    visual.src=foto.driveThumbLink;
+    visual.className='foto-thumb';
+  }else if(esDrive){
+    visual=document.createElement('div');
+    visual.className='foto-thumb';
+    visual.style.cssText='display:flex;align-items:center;justify-content:center;background:var(--bg2)';
+    visual.innerHTML='<i class="ti ti-brand-google-drive" style="font-size:22px;color:#0f9d58"></i>';
+  }else{
+    visual=document.createElement('img');
+    visual.src=foto;
+    visual.className='foto-thumb';
+  }
+  visual.onclick=()=>esDrive?window.open(foto.driveViewLink,'_blank','noopener'):abrirLightbox(foto);
+  if(esDrive){
+    const badge=document.createElement('div');
+    badge.title='Guardada en Google Drive';
+    badge.style.cssText='position:absolute;bottom:2px;right:2px;background:#fff;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 2px rgba(0,0,0,.4)';
+    badge.innerHTML='<i class="ti ti-brand-google-drive" style="font-size:10px;color:#0f9d58"></i>';
+    wrap.appendChild(badge);
+  }
   const del=document.createElement('button');
   del.type='button';
   del.className='foto-thumb-del';
   del.title='Quitar foto';
   del.innerHTML='✕';
   del.onclick=e=>{e.stopPropagation();wrap.remove();};
-  wrap.appendChild(img);
+  wrap.appendChild(visual);
   wrap.appendChild(del);
   preview.appendChild(wrap);
 }
-function addFotoPreview(input, previewId){
+async function addFotoPreview(input, previewId, driveCtx){
   const files=Array.from(input.files);
-  files.forEach(file=>{
-    if(!file.type.startsWith('image/'))return;
+  const useDrive=driveCtx && document.getElementById(driveCtx.checkboxId)?.checked;
+  for(const file of files){
+    if(!file.type.startsWith('image/')) continue;
+    if(useDrive){
+      try{
+        const nombre=driveCtx.getNombre();
+        if(!nombre) throw new Error('Selecciona el paciente primero');
+        const folderId=await obtenerOCrearCarpetaDrivePaciente(nombre);
+        const driveObj=await subirFotoADrive(file, folderId);
+        crearFotoThumb(previewId, driveObj);
+      }catch(e){
+        showToast('Error subiendo a Drive: '+e.message, true);
+      }
+      continue;
+    }
     const reader=new FileReader();
     reader.onload=e=>crearFotoThumb(previewId, e.target.result);
     reader.readAsDataURL(file);
-  });
+  }
 }
 function prefillFotoPreview(previewId, fotos){
   (fotos||[]).forEach(f=>crearFotoThumb(previewId, f));
 }
 function getFotosFromPreview(previewId){
   const preview=document.getElementById(previewId);if(!preview)return[];
-  return Array.from(preview.querySelectorAll('img')).map(img=>img.dataset.b64).filter(Boolean);
+  return Array.from(preview.querySelectorAll('.foto-thumb-wrap')).map(wrap=>{
+    try{return JSON.parse(wrap.dataset.raw);}catch(e){return null;}
+  }).filter(Boolean);
 }
 function abrirLightbox(src){
   const lb=document.createElement('div');
@@ -2698,8 +2797,155 @@ function renderGaleriaFotos(fotos){
   if(!fotos||!fotos.length) return '';
   return`<div style="margin-top:6px">
     <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">Fotos:</div>
-    <div class="foto-thumbs">${fotos.map(f=>`<img src="${f}" class="foto-thumb" onclick="abrirLightbox('${f.replace(/'/g,"\\'")}')"/>`).join('')}</div>
+    <div class="foto-thumbs">${fotos.map(f=>{
+      if(f&&typeof f==='object'&&f.driveViewLink){
+        const inner=f.driveThumbLink
+          ?`<img src="${f.driveThumbLink}" class="foto-thumb"/>`
+          :`<div class="foto-thumb" style="display:flex;align-items:center;justify-content:center;background:var(--bg2)"><i class="ti ti-brand-google-drive" style="font-size:20px;color:#0f9d58"></i></div>`;
+        return`<a href="${f.driveViewLink}" target="_blank" rel="noopener" title="Ver en Google Drive">${inner}</a>`;
+      }
+      return`<img src="${f}" class="foto-thumb" onclick="abrirLightbox('${String(f).replace(/'/g,"\\'")}')"/>`;
+    }).join('')}</div>
   </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INTEGRACIÓN GOOGLE (Calendar / Drive) — OAuth en el navegador vía Google Identity
+// Services. Cada usuario autoriza una vez por sesión (popup) con la cuenta de
+// Google de la oficina; el access token vive solo en memoria, nunca se guarda.
+// ══════════════════════════════════════════════════════════════════════════════
+const GOOGLE_SCOPES='https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file';
+let _gTokenClient=null, _gAccessToken=null, _gTokenExpiresAt=0;
+
+function googleDisponible(){
+  return !!(DB.googleClientId && window.google && google.accounts && google.accounts.oauth2);
+}
+
+function ensureGoogleAuth(){
+  if(!googleDisponible()) return Promise.resolve(null);
+  if(_gAccessToken && Date.now()<_gTokenExpiresAt) return Promise.resolve(_gAccessToken);
+  return new Promise((resolve)=>{
+    if(!_gTokenClient){
+      _gTokenClient=google.accounts.oauth2.initTokenClient({
+        client_id: DB.googleClientId,
+        scope: GOOGLE_SCOPES,
+        callback: (resp)=>{
+          if(resp&&resp.access_token){
+            _gAccessToken=resp.access_token;
+            _gTokenExpiresAt=Date.now()+(parseInt(resp.expires_in||'3500',10)*1000)-30000;
+            resolve(_gAccessToken);
+          }else resolve(null);
+        },
+        error_callback: ()=>resolve(null),
+      });
+    }
+    _gTokenClient.requestAccessToken();
+  });
+}
+
+async function gFetch(url, opts={}){
+  const token=await ensureGoogleAuth();
+  if(!token) throw new Error('No se pudo autenticar con Google');
+  const headers=Object.assign({}, opts.headers||{}, {Authorization:'Bearer '+token});
+  const res=await fetch(url, Object.assign({}, opts, {headers}));
+  if(!res.ok){
+    const t=await res.text().catch(()=>'');
+    throw new Error('Google API '+res.status+': '+t.slice(0,200));
+  }
+  return res;
+}
+
+// ── Calendar: crea/actualiza/borra el evento de "próxima visita" ligado a una colocación ──
+async function sincronizarEventoCalendar(reg){
+  if(!googleDisponible()) return;
+  try{
+    if(!reg.proxima_colocacion){
+      if(reg.google_event_id){
+        await gFetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${reg.google_event_id}`,{method:'DELETE'}).catch(()=>{});
+        await api.put('/registros/'+reg.id,{google_event_id:''});
+        reg.google_event_id='';
+      }
+      return;
+    }
+    const fecha=reg.proxima_colocacion;
+    const siguiente=new Date(fecha+'T00:00:00'); siguiente.setDate(siguiente.getDate()+1);
+    const body=JSON.stringify({
+      summary:`Visita Dipromes — ${reg.nombre}`,
+      description:`Paciente: ${reg.nombre}\nDirección: ${reg.direccion||'—'}\nTeléfono: ${reg.tel1||'—'}\nColocación: ${reg.motivo||reg.id}`,
+      start:{date:fecha},
+      end:{date:siguiente.toISOString().split('T')[0]},
+    });
+    let eventId=reg.google_event_id, res=null;
+    if(eventId){
+      try{
+        res=await gFetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,{
+          method:'PATCH', headers:{'Content-Type':'application/json'}, body,
+        });
+      }catch(e){ eventId=''; } // el evento pudo haberse borrado manualmente en Calendar
+    }
+    if(!eventId){
+      res=await gFetch('https://www.googleapis.com/calendar/v3/calendars/primary/events',{
+        method:'POST', headers:{'Content-Type':'application/json'}, body,
+      });
+    }
+    const data=await res.json();
+    if(data.id && data.id!==reg.google_event_id){
+      await api.put('/registros/'+reg.id,{google_event_id:data.id});
+      reg.google_event_id=data.id;
+    }
+  }catch(e){
+    showToast('No se pudo sincronizar con Google Calendar: '+e.message, true);
+  }
+}
+
+// ── Drive: carpeta raíz "Dipromes - Fotos" → subcarpeta por paciente ──
+async function obtenerOCrearCarpetaDriveRaiz(){
+  if(DB.googleDriveRootId) return DB.googleDriveRootId;
+  const res=await gFetch('https://www.googleapis.com/drive/v3/files?fields=id',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:'Dipromes - Fotos', mimeType:'application/vnd.google-apps.folder'}),
+  });
+  const data=await res.json();
+  DB.googleDriveRootId=data.id;
+  try{ await api.put('/config/google_drive_root',{folderId:data.id}); }catch(e){}
+  return data.id;
+}
+
+async function obtenerOCrearCarpetaDrivePaciente(nombre){
+  const pm=DB.pacientes_master[nombre];
+  if(pm&&pm.google_drive_folder_id) return pm.google_drive_folder_id;
+  const rootId=await obtenerOCrearCarpetaDriveRaiz();
+  const res=await gFetch('https://www.googleapis.com/drive/v3/files?fields=id',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:nombre, mimeType:'application/vnd.google-apps.folder', parents:[rootId]}),
+  });
+  const data=await res.json();
+  DB.pacientes_master[nombre]=Object.assign({}, DB.pacientes_master[nombre], {google_drive_folder_id:data.id});
+  try{ await api.put('/pacientes-master/'+encodeURIComponent(nombre), {google_drive_folder_id:data.id}); }catch(e){}
+  return data.id;
+}
+
+async function subirFotoADrive(file, folderId){
+  const metadata={name:`${Date.now()}_${file.name}`, parents:[folderId]};
+  const boundary='dipromes_'+Math.random().toString(36).slice(2);
+  const filePart=await file.arrayBuffer();
+  const body=new Blob([
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
+    `--${boundary}\r\nContent-Type: ${file.type||'application/octet-stream'}\r\n\r\n`,
+    filePart,
+    `\r\n--${boundary}--`,
+  ]);
+  const res=await gFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,thumbnailLink',{
+    method:'POST', headers:{'Content-Type':`multipart/related; boundary=${boundary}`}, body,
+  });
+  const data=await res.json();
+  try{
+    await gFetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({role:'reader', type:'anyone'}),
+    });
+  }catch(e){/* no crítico si falla el permiso de link público */}
+  return {driveId:data.id, driveViewLink:data.webViewLink||`https://drive.google.com/file/d/${data.id}/view`, driveThumbLink:data.thumbnailLink||'', nombre:file.name};
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2724,7 +2970,8 @@ function abrirSubirFotos(){
     </div>
     <div class="form-group span2">
       <label><i class="ti ti-camera" style="vertical-align:-2px"></i> Fotos</label>
-      <input type="file" id="sf-fotos" multiple accept="image/*" onchange="addFotoPreview(this,'sf-foto-preview')" style="font-size:12px">
+      <input type="file" id="sf-fotos" multiple accept="image/*" onchange="addFotoPreview(this,'sf-foto-preview',{checkboxId:'sf-drive',getNombre:()=>document.getElementById('sf-pac').value})" style="font-size:12px">
+      ${googleDriveCheckboxHtml('sf-drive')}
       <div id="sf-foto-preview" class="foto-thumbs" style="margin-top:8px"></div>
       <div style="font-size:10px;color:var(--text3);margin-top:4px">Se agregan a las fotos que ya tenga esa colocación — no las reemplazan.</div>
     </div>
