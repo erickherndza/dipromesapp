@@ -108,7 +108,7 @@ Aprovechar el plan de hosting ya pagado (Bana Professional Deluxe Unlimited SSD)
 3. **Bug de orden en el seed inicial**: `apply_migrations()` crea el usuario `feli` (vía `_ensure_user`) *antes* de que `seed_if_empty()` revise `Usuario.query.count() == 0` — en una base de datos nueva, `feli` ya existe para cuando se hace esa revisión, así que `admin`/`dr1` nunca se creaban. Fix: `seed_if_empty()` ahora usa `_ensure_user("admin", ...)` y `_ensure_user("dr1", ...)` en vez del bloque `if count == 0`. Este bug también afectaría a `dipromes`/Render si alguna vez arrancara con una base vacía (nunca ha pasado porque su base tiene meses de datos).
 4. **Frontend (`index.html`) usaba rutas absolutas `/api/...`** asumiendo que la app vive en la raíz del dominio. Se agregó `const API_BASE = location.pathname.replace(/\/(index\.html)?$/, '')` y se prefijaron las ~10 llamadas (`api.get/post/put/del`, exportaciones, logout, PDF de consentimiento) con `API_BASE`. Con la app ahora en la raíz del subdominio esto es un no-op (`API_BASE` = `""`), pero deja la app portable a un subpath en el futuro sin romperse.
 
-**⚠️ Estado del repo:** los fixes de esta sesión (`backend/app.py`, `backend/requirements.txt`, `index.html`, este `CLAUDE.md`) están aplicados en el servidor y en el working tree local, **pero todavía NO se han comiteado ni pusheado a GitHub** — el usuario no ha confirmado. El único commit real pusheado sigue siendo `41138f6` (root `requirements.txt`). Antes de continuar, preguntar si se quiere comitear/pushear el resto.
+**✅ Estado del repo (actualizado 2026-09-18):** todos los fixes de esa sesión y de la del 2026-09-18 (puntos 1-8 del cliente + integración Google) están comiteados y pusheados a `origin/main` en GitHub, y coinciden con lo que corre en el servidor.
 
 **Pendiente opcional:**
 - Password de `admin`/`dr1`/`feli` siguen en su default (`dipromes2026` / `doctor123` / `Feli@2026`) — cambiar si se van a usar en producción real, vía `ADMIN_PASS`/`DR1_PASS`/`FELI_PASS` env vars en Setup Python App (requiere borrar el usuario existente o cambiarle el hash manualmente, ya que `_ensure_user` no sobreescribe si ya existe).
@@ -398,9 +398,9 @@ El usuario pasó una lista de 8 cambios deseados. Estado final tras la sesión d
 |---|--------|--------|-----------|
 | 1 | "Colocaciones" debe mostrar solo pacientes con máquina activa | ✅ Implementado | `renderColocaciones`/`filterColocaciones` (`index.html:876-938`) filtran estrictamente `estatus==='Activo'` |
 | 2 | "Parámetros de configuración del equipo" en incrementos de 25 (100→300) | ✅ Implementado | `parametrosOpts()` (`index.html:471-475`): `[100,125,150,175,200,225,250,275,300]`, ya es un `<select>`, no texto libre |
-| 3 | "Próxima visita" integrada con Google Calendar | ✅ Implementado (código) — falta configurar `GOOGLE_CLIENT_ID` | Checkbox "Sincronizar con Google Calendar" en `abrirColocacion`/`abrirEditarColocacion`/`abrirAsignarEquipo` → `sincronizarEventoCalendar()` (`index.html`, sección "INTEGRACIÓN GOOGLE"). Ver sección dedicada abajo |
+| 3 | "Próxima visita" integrada con Google Calendar | ✅ Implementado y activo | Checkbox "Sincronizar con Google Calendar" en `abrirColocacion`/`abrirEditarColocacion`/`abrirAsignarEquipo` → `sincronizarEventoCalendar()` (`index.html`, sección "INTEGRACIÓN GOOGLE"). `GOOGLE_CLIENT_ID` ya configurado en producción — ver sección dedicada abajo |
 | 4 | Quitar campos "máquina" y "área de lesión" al registrar una próxima colocación (paciente ya existente) | ✅ Implementado | `onPacChange()` (`index.html:493-`) oculta `col-maq-wrap`/`col-lesion-wrap` y autocompleta ambos valores (máquina activa o última usada, lesión de la última colocación) cuando el paciente ya tiene colocaciones previas |
-| 5 | Fotos de evidencia a carpeta individual de Google Drive | ✅ Implementado (código) — falta configurar `GOOGLE_CLIENT_ID` | Checkbox en el flujo "Subir fotos" (`abrirSubirFotos`) → `obtenerOCrearCarpetaDrivePaciente()` + `subirFotoADrive()`. Carpeta raíz "Dipromes - Fotos" con subcarpeta por paciente. Ver sección dedicada abajo |
+| 5 | Fotos de evidencia a carpeta individual de Google Drive | ✅ Implementado y activo | Checkbox en el flujo "Subir fotos" (`abrirSubirFotos`) → `obtenerOCrearCarpetaDrivePaciente()` + `subirFotoADrive()`. Carpeta raíz "Dipromes - Fotos" con subcarpeta por paciente. `GOOGLE_CLIENT_ID` ya configurado en producción — ver sección dedicada abajo |
 | 6 | Poder indicar a qué colocación pertenecen las fotos subidas | ✅ Implementado | Flujo dedicado "Subir fotos" (`abrirSubirFotos()`) obliga a elegir paciente y luego la colocación específica antes de adjuntar fotos |
 | 7 | Poder editar una colocación después de registrada | ✅ Implementado | `abrirEditarColocacion()`/`guardarEditarColocacion()` — modal completo, botón lápiz en varias vistas de lista |
 | 8 | Asignar máquina a un paciente recién registrado sin que cuente como nueva colocación | ✅ Implementado | `abrirAsignarEquipo()`/`guardarAsignarEquipo()` actualiza el mismo registro existente en vez de crear uno nuevo cuando el paciente ya tiene un registro activo sin máquina |
@@ -418,15 +418,29 @@ El usuario pasó una lista de 8 cambios deseados. Estado final tras la sesión d
 - El checkbox "Sincronizar con Google Calendar" aparece en los 3 formularios que tienen "Próxima visita estimada" (`abrirColocacion`, `abrirEditarColocacion`, `abrirAsignarEquipo`). El checkbox "Guardar en Google Drive" solo está en el flujo dedicado "Subir fotos" (que ya obliga a elegir paciente + colocación, por el punto #6) — el upload rápido de fotos dentro del formulario de colocación sigue usando base64 sin cambios.
 - Si `GOOGLE_CLIENT_ID` no está configurado, ambos checkboxes se reemplazan por un texto informativo y el resto de la app sigue funcionando exactamente igual (feature 100% opcional/aditiva).
 
-**⚠️ Pendiente para activarlo — requiere que el usuario cree credenciales en Google Cloud Console:**
-1. Entrar a [console.cloud.google.com](https://console.cloud.google.com) con la cuenta `dipromesterapiadevac@gmail.com` y crear un proyecto nuevo (ej. "Dipromes App").
-2. *APIs & Services → Library* → habilitar **Google Calendar API** y **Google Drive API**.
-3. *APIs & Services → OAuth consent screen* → tipo **External** (o Internal si la cuenta fuera Workspace, no lo es), agregar `dipromesterapiadevac@gmail.com` como usuario de prueba si queda en modo "Testing" (suficiente para uso interno; no hace falta publicarla para verificación de Google).
-4. *APIs & Services → Credentials → Create Credentials → OAuth client ID* → tipo **Web application**. En **Authorized JavaScript origins** agregar `https://dipromes.erickhernandezarias.net`. NO hace falta redirect URI (el flujo de token client no la usa).
-5. Copiar el **Client ID** generado (termina en `.apps.googleusercontent.com`) y agregarlo en cPanel → *Setup Python App* → Environment variables → `GOOGLE_CLIENT_ID` → Restart.
-6. Probar: abrir una colocación, tildar "Sincronizar con Google Calendar", guardar → debe aparecer un popup de Google pidiendo iniciar sesión (usar `dipromesterapiadevac@gmail.com`) y aceptar permisos de Calendar/Drive. Verificar que el evento aparece en `calendar.google.com` y que la carpeta "Dipromes - Fotos" aparece en el Drive de esa cuenta.
+**✅ Activado en producción (2026-09-18):**
+
+El proyecto de Google Cloud usado NO es uno nuevo bajo `dipromesterapiadevac@gmail.com` — esa cuenta pidió vincular una forma de pago al intentar crear un proyecto propio (verificación anti-abuso de Google para cuentas nuevas, no un requisito real de las APIs usadas). En su lugar se reusó el proyecto de Google Cloud personal ya existente del usuario, **"EHA Ads"** (`eha-ads`), que ya tenía cuenta verificada. Esto es válido porque el proyecto que posee el Client ID no tiene que coincidir con la cuenta que autoriza en tiempo de ejecución — cualquier cuenta de Google (`dipromesterapiadevac@gmail.com` incluida) puede autorizar el popup sin importar quién sea el dueño del proyecto.
+
+Pasos aplicados en `eha-ads`:
+1. *APIs & Services → Library* → habilitadas **Google Calendar API** y **Google Drive API** (sin pedir facturación).
+2. *Google Auth Platform → Público* → tipo **Usuarios externos**, estado **Prueba** (Testing) — se agregó `dipromesterapiadevac@gmail.com` a la lista de "Usuarios de prueba" (junto a `methoner@gmail.com` que ya estaba).
+3. *Google Auth Platform → Clientes → Crear cliente* → tipo **Aplicación web**, nombre "Dipromes App", origen autorizado `https://dipromes.erickhernandezarias.net` (sin redirect URI, el flujo de token client no la usa).
+4. Client ID resultante: `706578307356-12j3bj67j6a9lenni3lgkp9hggeatc8k.apps.googleusercontent.com` (el client secret que Google mostró junto a este no se usa ni se guardó en ningún lado — el flujo de `initTokenClient` solo necesita el Client ID).
+5. Client ID agregado en cPanel → *Setup Python App* → `dipromes.erickhernandezarias.net` → Environment variables → `GOOGLE_CLIENT_ID` → **Save** → **Restart**.
+6. Verificado que la app sigue arrancando bien tras el restart (carga el login normalmente).
+
+**Pendiente de que el usuario confirme en la práctica:** abrir una colocación real, tildar "Sincronizar con Google Calendar", guardar, autorizar el popup con `dipromesterapiadevac@gmail.com`, y confirmar que el evento aparece en `calendar.google.com` y que sube fotos a la carpeta "Dipromes - Fotos" en Drive. Como la app OAuth quedó en modo **Prueba** (no publicada/verificada por Google), solo las cuentas en la lista de "Usuarios de prueba" del proyecto `eha-ads` pueden autorizar — si en el futuro se necesita que otra cuenta de Google use estos checkboxes, hay que agregarla ahí (*Google Auth Platform → Público → Usuarios de prueba*, límite de 100 antes de verificar la app).
 
 **No requiere tocar nada en el repo `dipromes` (Render)** — esta integración es específica de `dipromesapp`.
+
+---
+
+## Nota operativa: red con firewall Fortinet bloquea GitHub (2026-09-18)
+
+Durante esta sesión, la red desde donde se trabajó (oficina) tenía un **firewall Fortinet haciendo inspección SSL/TLS completa** — sustituye el certificado real de cualquier HTTPS (incluido `github.com`) por uno propio (`issuer: O=Fortinet, CN=FGT60FTK2209H8SJ`), lo cual rompe la verificación de certificados de `git push`, `gh auth login` y `curl` por igual. Se confirmó que no es un problema del entorno de Claude Code sino de la red completa (el usuario corrió `gh auth login` directamente y le dio el mismo error).
+
+**Mientras tanto, para desplegar el código al servidor sin poder pushear a GitHub**, se usó cPanel *File Manager* → botón **Upload** (abre `.../filemanager/upload-ajax.html?dir=<carpeta>` con un input de archivo real) para subir `index.html`, `backend/app.py` y `backend/models.py` directo desde la Mac local, con "Overwrite existing files" activado, seguido de `touch tmp/restart.txt` por *Terminal* para reiniciar Passenger. Esto mantuvo el servidor actualizado mientras el repo local esperaba poder pushear. Una vez el usuario llegó a una red sin ese firewall, el push a GitHub se completó con normalidad y ambos quedaron sincronizados.
 
 ---
 
