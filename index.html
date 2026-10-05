@@ -624,7 +624,7 @@ function stBadge(s){
   const m={'Activo':'ok','Desactivado':'gray','Operativa':'ok','Requiere Revisión':'warn','Sin registrar':'danger','Fuera de Servicio':'danger','Activa con paciente':'ok'};
   return`<span class="badge badge-${m[s]||'gray'}">${s}</span>`;
 }
-// Estado de pago de una colocación: azul = pagado, rojo = no pagado (saldo pendiente)
+// Estado de saldo de una colocación: rojo = tiene saldo pendiente, azul = sin saldo pendiente
 function estadoPago(r){
   const fact=r.facturacion||0, saldo=r.saldo_pendiente||0;
   if(fact<=0 && saldo<=0) return null;           // sin conduce: no aplica
@@ -634,8 +634,8 @@ function pagoBadge(r){
   const e=estadoPago(r);
   if(!e) return '';
   return e==='pagado'
-    ? `<span class="badge badge-pagado"><i class="ti ti-circle-check" style="font-size:11px"></i> Pagado</span>`
-    : `<span class="badge badge-nopagado" title="Saldo pendiente: ${fmt(r.saldo_pendiente||0)}"><i class="ti ti-alert-circle" style="font-size:11px"></i> No pagado</span>`;
+    ? `<span class="badge badge-pagado"><i class="ti ti-circle-check" style="font-size:11px"></i> Sin saldo</span>`
+    : `<span class="badge badge-nopagado" ><i class="ti ti-alert-circle" style="font-size:11px"></i> Saldo ${fmt(r.saldo_pendiente||0)}</span>`;
 }
 // Monto del conduce coloreado según el estado de pago + badge debajo
 function montoPago(r){
@@ -1476,8 +1476,8 @@ function renderFacturacion(){
         <div class="progress-bar" style="width:${Math.round(p.facturado/maxFact*100)}%;background:var(--brand)"></div>
       </div>
       ${p.saldo>0
-        ?`<div style="font-size:11px;color:var(--danger)"><i class="ti ti-alert-circle" style="font-size:10px"></i> No pagado · saldo ${fmt(p.saldo)}</div>`
-        :`<div style="font-size:11px;color:var(--info)"><i class="ti ti-circle-check" style="font-size:10px"></i> Pagado</div>`}
+        ?`<div style="font-size:11px;color:var(--danger)"><i class="ti ti-alert-circle" style="font-size:10px"></i> Saldo pendiente: ${fmt(p.saldo)}</div>`
+        :`<div style="font-size:11px;color:var(--info)"><i class="ti ti-circle-check" style="font-size:10px"></i> Sin saldo pendiente</div>`}
     </div>`).join('')}
   </div>
 </div>
@@ -1509,8 +1509,8 @@ function abrirEditConduce(id){
       <label>Saldo pendiente (DOP)</label>
       <input type="number" id="ec-saldo" value="${r.saldo_pendiente||0}" min="0" step="500">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:8px">
-        <span style="font-size:11px;color:var(--text-light)">0 = totalmente pagado</span>
-        <button type="button" class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="document.getElementById('ec-saldo').value=0"><i class="ti ti-circle-check"></i> Marcar como pagado</button>
+        <span style="font-size:11px;color:var(--text-light)">0 = sin saldo pendiente</span>
+        <button type="button" class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="document.getElementById('ec-saldo').value=0"><i class="ti ti-circle-check"></i> Poner saldo en 0</button>
       </div>
     </div>
     <div class="form-group span2">
@@ -1757,7 +1757,7 @@ function abrirEditarColocacion(id){
     <div class="form-group"><label>Dr. que refiere</label><input type="text" id="ec2-dr" value="${esc(reg.dr_refiere)||''}"></div>
     <div class="form-group"><label>Monto del Conduce (DOP)</label><input type="number" id="ec2-fact" value="${reg.facturacion||0}" min="0"></div>
     <div class="form-group"><label>Saldo pendiente (DOP)</label><input type="number" id="ec2-saldo" value="${reg.saldo_pendiente||0}" min="0">
-      <button type="button" class="btn btn-sm" style="margin-top:6px;border-color:var(--info);color:var(--info)" onclick="document.getElementById('ec2-saldo').value=0"><i class="ti ti-circle-check"></i> Marcar como pagado</button></div>
+      <button type="button" class="btn btn-sm" style="margin-top:6px;border-color:var(--info);color:var(--info)" onclick="document.getElementById('ec2-saldo').value=0"><i class="ti ti-circle-check"></i> Poner saldo en 0</button></div>
     <div class="section-divider">Condiciones de uso del equipo</div>
     <div class="form-group"><label>Modo de uso</label>
       <select id="ec2-modo">
