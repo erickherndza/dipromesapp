@@ -530,7 +530,7 @@ function onPacChange(){
   if(numEl){
     if(total>0){
       const etiquetas=['1era','2da','3era','4ta','5ta','6ta','7ma','8va','9na','10ma'];
-      numEl.value=(etiquetas[total]||`${total+1}ra`)+' Colocacion';
+      numEl.value=(etiquetas[total]||`${total+1}ª`)+' Colocacion';
       numEl.title='Sugerido según el historial del paciente — puedes modificarlo';
     }
   }
@@ -1406,7 +1406,7 @@ function renderFacturacion(){
 
 <div style="display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start">
 
-<div class="card" style="padding:0;overflow:hidden">
+<div class="card" style="padding:0;overflow-x:auto">
   <table class="tbl">
     <thead>
       <tr>
@@ -1454,7 +1454,7 @@ function renderFacturacion(){
       <tr style="background:var(--surface-alt,#f8f9fa);font-weight:700">
         <td colspan="3" style="font-size:12px;color:var(--text-light)">Total (${conduces.length} conduces)</td>
         <td style="text-align:right">${fmt(conduces.reduce((s,r)=>s+(r.facturacion||0),0))}</td>
-        <td style="text-align:right;color:var(--danger)">${fmt(conduces.reduce((s,r)=>s+(r.saldo_pendiente||0),0))}</td>
+        <td style="text-align:right;color:${conduces.some(r=>(r.saldo_pendiente||0)>0)?'var(--danger)':'var(--info)'}">${fmt(conduces.reduce((s,r)=>s+(r.saldo_pendiente||0),0))}</td>
         <td style="text-align:right;color:var(--info)">${fmt(conduces.reduce((s,r)=>s+(r.facturacion||0)-(r.saldo_pendiente||0),0))}</td>
         <td></td><td></td>
       </tr>
@@ -2078,7 +2078,7 @@ function abrirAsignarEquipo(nombre){
   const esPrimeraAsignacion = !!activeReg;
   const etiquetas=['1era','2da','3era','4ta','5ta','6ta','7ma','8va','9na','10ma'];
   const totalColocPrevias = p.colocaciones.filter(c=>!(activeReg&&c.id===activeReg.id)).length;
-  const numColoc = (activeReg&&activeReg.motivo) || (etiquetas[totalColocPrevias]||`${totalColocPrevias+1}ra`)+' Colocacion';
+  const numColoc = (activeReg&&activeReg.motivo) || (etiquetas[totalColocPrevias]||`${totalColocPrevias+1}ª`)+' Colocacion';
 
   // Si el paciente ya usó una máquina antes y sigue disponible, se reasigna la misma
   // sin obligar a elegir de nuevo (punto: la máquina ya estaría asignada desde el inicio).
