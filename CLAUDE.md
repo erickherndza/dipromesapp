@@ -65,7 +65,7 @@ Aprovechar el plan de hosting ya pagado (Bana Professional Deluxe Unlimited SSD)
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` — opcional, para forgot-password
 
 4. **Subir el código**
-   - Vía Git (cPanel → *Git Version Control* → clonar `https://github.com/erickherndza/dipromesapp.git`) o File Manager
+   - Vía `git clone https://github.com/erickherndza/dipromesapp.git` desde la *Terminal* de cPanel, o File Manager. ⚠️ El panel/API *Git Version Control* **no está habilitado** en este plan (UAPI responde *"You do not have the feature version_control"*) — usar `git` directo en Terminal. Ver **Deploy de cambios** más abajo.
    - Asegurar que quedan en el root de la app: `index.html`, `passenger_wsgi.py`, `backend/`, `render.yaml` (no molesta, simplemente no se usa)
 
 5. **Instalar dependencias**
@@ -108,7 +108,18 @@ Aprovechar el plan de hosting ya pagado (Bana Professional Deluxe Unlimited SSD)
 3. **Bug de orden en el seed inicial**: `apply_migrations()` crea el usuario `feli` (vía `_ensure_user`) *antes* de que `seed_if_empty()` revise `Usuario.query.count() == 0` — en una base de datos nueva, `feli` ya existe para cuando se hace esa revisión, así que `admin`/`dr1` nunca se creaban. Fix: `seed_if_empty()` ahora usa `_ensure_user("admin", ...)` y `_ensure_user("dr1", ...)` en vez del bloque `if count == 0`. Este bug también afectaría a `dipromes`/Render si alguna vez arrancara con una base vacía (nunca ha pasado porque su base tiene meses de datos).
 4. **Frontend (`index.html`) usaba rutas absolutas `/api/...`** asumiendo que la app vive en la raíz del dominio. Se agregó `const API_BASE = location.pathname.replace(/\/(index\.html)?$/, '')` y se prefijaron las ~10 llamadas (`api.get/post/put/del`, exportaciones, logout, PDF de consentimiento) con `API_BASE`. Con la app ahora en la raíz del subdominio esto es un no-op (`API_BASE` = `""`), pero deja la app portable a un subpath en el futuro sin romperse.
 
-**✅ Estado del repo (actualizado 2026-09-18):** todos los fixes de esa sesión y de la del 2026-09-18 (puntos 1-8 del cliente + integración Google) están comiteados y pusheados a `origin/main` en GitHub, y coinciden con lo que corre en el servidor.
+**✅ Estado del repo (actualizado 2026-10-04):** el servidor corre exactamente `origin/main` vía `git pull` (ver **Deploy de cambios**). Nota histórica: hasta el 2026-10-04 el clon del servidor seguía en `9213379` y los cambios del 15–18 sept se habían subido archivo por archivo (File Manager); el contenido coincidía con GitHub pero git no. Se reconcilió ese día — los cambios locales viejos quedaron en `git stash` (`pre-pull-20261004`) y el `requirements.txt` raíz no rastreado en `requirements.txt.pre-pull` (idéntico al rastreado). Ambos, junto con `index.html.bak-20261004`, se pueden borrar.
+
+### Deploy de cambios (flujo normal desde 2026-10-04)
+
+1. Comitear y `git push origin main` desde local.
+2. cPanel → *Terminal* (`https://bh8918.banahosting.com:2083/<cpsess>/frontend/jupiter/terminal/index.html`) — **teclear** (no pegar, la Terminal web corrompe pegados largos):
+   ```bash
+   cd ~/dipromesapp && git pull --ff-only origin main && touch tmp/restart.txt
+   ```
+3. Verificar: abrir la app, `fetch(API_BASE+'/api/registros')` → 200. Una pestaña nueva muestra el login aunque la cookie sea válida (el frontend guarda el estado de login por pestaña) — no es un error.
+4. Si `git status` en el servidor muestra archivos modificados, comparar con `git diff --stat origin/main` antes de hacer `stash`.
+5. Si GitHub está bloqueado (ver nota Fortinet), alternativa: File Manager → Upload + `touch tmp/restart.txt`.
 
 **Pendiente opcional:**
 - Password de `admin`/`dr1`/`feli` siguen en su default (`dipromes2026` / `doctor123` / `Feli@2026`) — cambiar si se van a usar en producción real, vía `ADMIN_PASS`/`DR1_PASS`/`FELI_PASS` env vars en Setup Python App (requiere borrar el usuario existente o cambiarle el hash manualmente, ya que `_ensure_user` no sobreescribe si ya existe).
@@ -194,6 +205,13 @@ Todas las colocaciones. Filtros por nombre/cédula, estado, mes. Exportar a Exce
 
 ### 6. Conduces de Descargo (Facturación)
 Resumen de facturación y saldos pendientes por paciente.
+
+**Indicador de saldo (2026-10-04):** basado solo en `saldo_pendiente` (no es "pagado/no pagado" — el cliente lo pidió así explícitamente):
+- 🔴 rojo (`badge-nopagado`, `--danger`) → `saldo_pendiente > 0`, etiqueta "Saldo RD$X"
+- 🔵 azul (`badge-pagado`, `--info`) → sin saldo pendiente, etiqueta "Sin saldo"
+- Sin etiqueta si la colocación no tiene monto de conduce ni saldo
+- Helpers en `index.html`: `estadoPago(r)`, `pagoBadge(r)`, `montoPago(r)` (junto a `stBadge`). `montoPago` se usa en todas las tablas que muestran el monto (Registro completo, Colocaciones, historial del paciente, ficha de máquina). En Conduces: columna **Estado**, métricas/totales/sidebar "Por paciente" con los mismos colores, y botón **"Poner saldo en 0"** en *Editar conduce* y *Editar colocación*.
+- Al 2026-10-04 los 38 conduces existentes tienen saldo 0 (todos azules) — el cliente va a cargar los saldos reales.
 
 ### 7. Consentimiento Informado
 - Módulo en sidebar: **Documentos → Consentimiento**
@@ -320,6 +338,8 @@ value: Text                # JSON
 
 1. **Una máquina = un paciente a la vez.** `paciente_actual` se calcula en runtime.
 2. **Múltiples colocaciones por paciente.** No se editan — se agregan filas nuevas.
+   - **N° Colocación (`motivo`)**: se sugiere automáticamente según el historial (`1era`…`10ma`, luego `11ª`, `12ª`…) pero **siempre es editable** (antes quedaba `readonly` en *Nueva colocación* y *Asignar equipo*).
+   - **Cambiar el N° en *Editar colocación* crea una colocación nueva** (2026-10-04): aparece la casilla `ec2-nueva` (marcada por defecto) → `guardarComoNuevaColocacion()` hace `POST /registros` con los datos del formulario (fotos/productos vacíos; monto y saldo se copian del formulario) y conserva el registro anterior intacto; si el anterior estaba `Activo` se cierra (`Desactivado`, `fecha_retiro` = fecha de la nueva) para no duplicar activos/máquina. Desmarcar la casilla = solo corregir el número del mismo registro.
 3. **Deduplicación por nombre** (→ por cédula en el futuro).
 4. **Montos en DOP** sin decimales. `Intl.NumberFormat('es-DO', {currency:'DOP'})`.
 5. **ITBIS 18%** — futuro, al emitir e-CF.
@@ -458,6 +478,8 @@ Durante esta sesión, la red desde donde se trabajó (oficina) tenía un **firew
 - [x] Gestión de usuarios (admin) con campo email
 - [x] Pantalla login: forgot-password con envío de contraseña temporal por email (smtplib/STARTTLS)
 - [x] Usuario `feli` creado automáticamente vía `_ensure_user()` en migrations
+- [x] Indicador de saldo pendiente rojo/azul en conduces y listas (2026-10-04)
+- [x] N° Colocación editable; cambiarlo en *Editar colocación* registra una nueva y conserva la anterior (2026-10-04)
 
 ### 🔲 Pendiente
 - [ ] Integración ECF SSD como PSFE (e-CF DGII tipo 01/02)
