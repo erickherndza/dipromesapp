@@ -87,6 +87,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg3);color:var
 .badge-danger{background:var(--danger-bg);color:var(--danger-t)}
 .badge-info{background:var(--info-bg);color:var(--info-t)}
 .badge-gray{background:var(--bg2);color:var(--text2)}
+.badge-pagado{background:var(--info-bg);color:var(--info-t)}
+.badge-nopagado{background:var(--danger-bg);color:var(--danger-t)}
 .badge-brand{background:var(--brand-dim2);color:var(--brand)}
 
 /* ── MODALES ── */
@@ -529,12 +531,7 @@ function onPacChange(){
     if(total>0){
       const etiquetas=['1era','2da','3era','4ta','5ta','6ta','7ma','8va','9na','10ma'];
       numEl.value=(etiquetas[total]||`${total+1}ra`)+' Colocacion';
-      numEl.readOnly=true;
-      numEl.style.background='var(--bg2)';
-      numEl.title='Se calcula automáticamente según el historial del paciente';
-    }else{
-      numEl.readOnly=false;
-      numEl.style.background='';
+      numEl.title='Sugerido según el historial del paciente — puedes modificarlo';
     }
   }
   // Próxima colocación de un paciente existente: la máquina y el área de
@@ -626,6 +623,26 @@ const initials=n=>n.split(' ').filter(Boolean).slice(0,2).map(w=>w[0].toUpperCas
 function stBadge(s){
   const m={'Activo':'ok','Desactivado':'gray','Operativa':'ok','Requiere Revisión':'warn','Sin registrar':'danger','Fuera de Servicio':'danger','Activa con paciente':'ok'};
   return`<span class="badge badge-${m[s]||'gray'}">${s}</span>`;
+}
+// Estado de pago de una colocación: azul = pagado, rojo = no pagado (saldo pendiente)
+function estadoPago(r){
+  const fact=r.facturacion||0, saldo=r.saldo_pendiente||0;
+  if(fact<=0 && saldo<=0) return null;           // sin conduce: no aplica
+  return saldo>0 ? 'nopagado' : 'pagado';
+}
+function pagoBadge(r){
+  const e=estadoPago(r);
+  if(!e) return '';
+  return e==='pagado'
+    ? `<span class="badge badge-pagado"><i class="ti ti-circle-check" style="font-size:11px"></i> Pagado</span>`
+    : `<span class="badge badge-nopagado" title="Saldo pendiente: ${fmt(r.saldo_pendiente||0)}"><i class="ti ti-alert-circle" style="font-size:11px"></i> No pagado</span>`;
+}
+// Monto del conduce coloreado según el estado de pago + badge debajo
+function montoPago(r){
+  if(!r.facturacion) return '—';
+  const e=estadoPago(r);
+  const color=e==='pagado'?'var(--info)':'var(--danger)';
+  return `<div style="color:${color};white-space:nowrap">${fmt(r.facturacion)}</div>${pagoBadge(r)}`;
 }
 function condBadge(s){
   const m={'Óptima':'ok','Buena':'ok','Con daños leves':'warn','Requiere revisión':'warn','Dañado':'danger','Requiere Revisión':'warn'};
@@ -907,7 +924,7 @@ function verPacienteDetalle(nombre){
           <td style="font-size:12px;white-space:nowrap">${c.fecha_retiro?fmtD(c.fecha_retiro):'<span style="color:var(--ok-t);font-weight:600">En uso</span>'}</td>
           <td>${c.condicion_retorno?condBadge(c.condicion_retorno):'<span style="color:var(--text3)">—</span>'}</td>
           <td>${stBadge(c.estatus)}</td>
-          <td style="font-weight:600">${c.facturacion?fmt(c.facturacion):'—'}</td>
+          <td style="font-weight:600">${montoPago(c)}</td>
           <td style="white-space:nowrap"><button class="btn btn-sm btn-ghost" title="Editar colocación" onclick="event.stopPropagation();abrirEditarColocacion('${c.id}')"><i class="ti ti-pencil"></i></button> <button class="btn btn-sm btn-ghost" title="Generar conduce" onclick="event.stopPropagation();generarConduce('${c.id}')"><i class="ti ti-printer"></i></button> <button class="btn btn-sm btn-danger" title="Eliminar" onclick="event.stopPropagation();eliminarColocacion('${c.id}')"><i class="ti ti-trash"></i></button></td>
         </tr>
         ${(c.notas||(c.productos&&c.productos.length)||(c.fotos&&c.fotos.length))?`<tr><td colspan="10" style="font-size:11px;color:var(--text2);padding:6px 13px 10px;background:var(--bg2)">${c.notas?`<div style="margin-bottom:4px">💬 ${c.notas}</div>`:''}${renderProductosEnHistorial(c.productos)}${renderGaleriaFotos(c.fotos)}</td></tr>`:''}`).join('')}
@@ -968,7 +985,7 @@ function filterColocaciones(){
       <td style="font-size:12px;white-space:nowrap">${fmtD(r.fecha)}</td>
       <td style="font-size:12px;white-space:nowrap">${r.fecha_retiro?fmtD(r.fecha_retiro):'<span style="color:var(--ok-t);font-weight:600">En uso</span>'}</td>
       <td><span class="badge badge-gray" style="font-size:10px">${esc(r.ars)||'—'}</span></td>
-      <td style="font-weight:600">${r.facturacion?fmt(r.facturacion):'—'}</td>
+      <td style="font-weight:600">${montoPago(r)}</td>
       <td>${stBadge(r.estatus)}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();verPacienteDetalle('${esc(r.nombre)}')"><i class="ti ti-eye"></i></button>
@@ -1094,7 +1111,7 @@ function filterRegistro(){
     <td>${r.maquina?`<span class="badge badge-brand" style="font-size:10px">${getMaquinaLabel(r.maquina)}</span>`:'<span style="color:var(--text3);font-size:12px">—</span>'}</td>
     <td>${stBadge(r.estatus)}</td>
     <td style="font-size:12px;color:var(--text2);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.notas||'').replace(/"/g,'&quot;')}">${r.motivo||'—'}${r.notas?` <span style="cursor:help">💬</span>`:''}</td>
-    <td style="font-weight:600;white-space:nowrap">${r.facturacion?fmt(r.facturacion):'—'}</td>
+    <td style="font-weight:600;white-space:nowrap">${montoPago(r)}</td>
     <td style="white-space:nowrap">
       <button class="btn btn-sm btn-ghost" title="Editar colocación" onclick="event.stopPropagation();abrirEditarColocacion('${r.id}')"><i class="ti ti-pencil"></i></button>
       <button class="btn btn-sm btn-ghost" title="Generar conduce" onclick="event.stopPropagation();generarConduce('${r.id}')"><i class="ti ti-printer"></i></button>
@@ -1200,7 +1217,7 @@ function verMaquinaDetalle(id){
           <td style="font-size:12px;white-space:nowrap">${r.fecha_retiro?fmtD(r.fecha_retiro):'<span style="color:var(--ok-t);font-weight:600">En uso</span>'}</td>
           <td>${r.condicion_retorno?condBadge(r.condicion_retorno):'<span style="color:var(--text3)">—</span>'}</td>
           <td>${stBadge(r.estatus)}</td>
-          <td style="font-weight:600">${r.facturacion?fmt(r.facturacion):'—'}</td>
+          <td style="font-weight:600">${montoPago(r)}</td>
         </tr>`).join('')}
       </tbody></table>`:'<div class="empty-state"><i class="ti ti-history"></i>Sin historial registrado</div>'}
   </div>
@@ -1360,12 +1377,12 @@ function renderFacturacion(){
   </div>
   <div class="metric">
     <div class="metric-label">Total cobrado</div>
-    <div class="metric-val ok">${fmt(totalCobrado)}</div>
+    <div class="metric-val" style="color:var(--info)">${fmt(totalCobrado)}</div>
     <div class="metric-sub">${Math.round(totalFact?totalCobrado/totalFact*100:0)}% del total</div>
   </div>
   <div class="metric">
     <div class="metric-label">Saldo pendiente</div>
-    <div class="metric-val ${totalSaldo>0?'warn':'ok'}">${fmt(totalSaldo)}</div>
+    <div class="metric-val" style="color:${totalSaldo>0?'var(--danger)':'var(--info)'}">${fmt(totalSaldo)}</div>
     <div class="metric-sub">${pacConSaldo.length} paciente${pacConSaldo.length!==1?'s':''} con deuda</div>
   </div>
   <div class="metric">
@@ -1399,11 +1416,12 @@ function renderFacturacion(){
         <th style="text-align:right">Conduce</th>
         <th style="text-align:right">Saldo</th>
         <th style="text-align:right">Cobrado</th>
+        <th>Estado</th>
         <th></th>
       </tr>
     </thead>
     <tbody>
-    ${conduces.length===0?`<tr><td colspan="7"><div class="empty-state"><i class="ti ti-receipt-off"></i>Sin conduces para este período</div></td></tr>`:''}
+    ${conduces.length===0?`<tr><td colspan="8"><div class="empty-state"><i class="ti ti-receipt-off"></i>Sin conduces para este período</div></td></tr>`:''}
     ${conduces.map(r=>{
       const saldo=r.saldo_pendiente||0;
       const cobrado=(r.facturacion||0)-saldo;
@@ -1416,13 +1434,14 @@ function renderFacturacion(){
         </span>
       </td>
       <td style="font-size:12px;color:var(--text-light)">${r.motivo||'—'}</td>
-      <td style="text-align:right;font-weight:700;font-size:13px">${fmt(r.facturacion)}</td>
+      <td style="text-align:right;font-weight:700;font-size:13px;color:${saldo>0?'var(--danger)':'var(--info)'}">${fmt(r.facturacion)}</td>
       <td style="text-align:right">
         ${saldo>0
-          ?`<span style="color:var(--warn);font-weight:600;font-size:13px">${fmt(saldo)}</span>`
-          :`<span style="color:var(--ok);font-size:12px">—</span>`}
+          ?`<span style="color:var(--danger);font-weight:600;font-size:13px">${fmt(saldo)}</span>`
+          :`<span style="color:var(--info);font-size:12px">—</span>`}
       </td>
-      <td style="text-align:right;font-size:13px;color:var(--ok);font-weight:600">${fmt(cobrado)}</td>
+      <td style="text-align:right;font-size:13px;color:var(--info);font-weight:600">${fmt(cobrado)}</td>
+      <td>${pagoBadge(r)}</td>
       <td style="text-align:right">
         <button class="btn btn-sm" onclick="abrirEditConduce('${r.id}')" title="Editar conduce">
           <i class="ti ti-pencil"></i>
@@ -1435,9 +1454,9 @@ function renderFacturacion(){
       <tr style="background:var(--surface-alt,#f8f9fa);font-weight:700">
         <td colspan="3" style="font-size:12px;color:var(--text-light)">Total (${conduces.length} conduces)</td>
         <td style="text-align:right">${fmt(conduces.reduce((s,r)=>s+(r.facturacion||0),0))}</td>
-        <td style="text-align:right;color:var(--warn)">${fmt(conduces.reduce((s,r)=>s+(r.saldo_pendiente||0),0))}</td>
-        <td style="text-align:right;color:var(--ok)">${fmt(conduces.reduce((s,r)=>s+(r.facturacion||0)-(r.saldo_pendiente||0),0))}</td>
-        <td></td>
+        <td style="text-align:right;color:var(--danger)">${fmt(conduces.reduce((s,r)=>s+(r.saldo_pendiente||0),0))}</td>
+        <td style="text-align:right;color:var(--info)">${fmt(conduces.reduce((s,r)=>s+(r.facturacion||0)-(r.saldo_pendiente||0),0))}</td>
+        <td></td><td></td>
       </tr>
     </tfoot>`:''}
   </table>
@@ -1456,7 +1475,9 @@ function renderFacturacion(){
       <div class="progress" style="margin-bottom:3px">
         <div class="progress-bar" style="width:${Math.round(p.facturado/maxFact*100)}%;background:var(--brand)"></div>
       </div>
-      ${p.saldo>0?`<div style="font-size:11px;color:var(--warn)"><i class="ti ti-alert-triangle" style="font-size:10px"></i> Saldo pendiente: ${fmt(p.saldo)}</div>`:''}
+      ${p.saldo>0
+        ?`<div style="font-size:11px;color:var(--danger)"><i class="ti ti-alert-circle" style="font-size:10px"></i> No pagado · saldo ${fmt(p.saldo)}</div>`
+        :`<div style="font-size:11px;color:var(--info)"><i class="ti ti-circle-check" style="font-size:10px"></i> Pagado</div>`}
     </div>`).join('')}
   </div>
 </div>
@@ -1487,7 +1508,10 @@ function abrirEditConduce(id){
     <div class="form-group span2">
       <label>Saldo pendiente (DOP)</label>
       <input type="number" id="ec-saldo" value="${r.saldo_pendiente||0}" min="0" step="500">
-      <div style="font-size:11px;color:var(--text-light);margin-top:4px">Deja en 0 si el conduce está totalmente cobrado</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:8px">
+        <span style="font-size:11px;color:var(--text-light)">0 = totalmente pagado</span>
+        <button type="button" class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="document.getElementById('ec-saldo').value=0"><i class="ti ti-circle-check"></i> Marcar como pagado</button>
+      </div>
     </div>
     <div class="form-group span2">
       <label>N° de colocación / nota</label>
@@ -1732,7 +1756,8 @@ function abrirEditarColocacion(id){
     <div class="form-group"><label>ARS / Seguro</label><select id="ec2-ars">${arsOptsGrouped(reg.ars)}</select></div>
     <div class="form-group"><label>Dr. que refiere</label><input type="text" id="ec2-dr" value="${esc(reg.dr_refiere)||''}"></div>
     <div class="form-group"><label>Monto del Conduce (DOP)</label><input type="number" id="ec2-fact" value="${reg.facturacion||0}" min="0"></div>
-    <div class="form-group"><label>Saldo pendiente (DOP)</label><input type="number" id="ec2-saldo" value="${reg.saldo_pendiente||0}" min="0"></div>
+    <div class="form-group"><label>Saldo pendiente (DOP)</label><input type="number" id="ec2-saldo" value="${reg.saldo_pendiente||0}" min="0">
+      <button type="button" class="btn btn-sm" style="margin-top:6px;border-color:var(--info);color:var(--info)" onclick="document.getElementById('ec2-saldo').value=0"><i class="ti ti-circle-check"></i> Marcar como pagado</button></div>
     <div class="section-divider">Condiciones de uso del equipo</div>
     <div class="form-group"><label>Modo de uso</label>
       <select id="ec2-modo">
@@ -2054,7 +2079,6 @@ function abrirAsignarEquipo(nombre){
   const etiquetas=['1era','2da','3era','4ta','5ta','6ta','7ma','8va','9na','10ma'];
   const totalColocPrevias = p.colocaciones.filter(c=>!(activeReg&&c.id===activeReg.id)).length;
   const numColoc = (activeReg&&activeReg.motivo) || (etiquetas[totalColocPrevias]||`${totalColocPrevias+1}ra`)+' Colocacion';
-  const numReadonly = totalColocPrevias > 0;
 
   // Si el paciente ya usó una máquina antes y sigue disponible, se reasigna la misma
   // sin obligar a elegir de nuevo (punto: la máquina ya estaría asignada desde el inicio).
@@ -2105,7 +2129,7 @@ function abrirAsignarEquipo(nombre){
   <input type="hidden" id="aeq-maqid" value="${maqAnteriorDisponible?maqAnteriorId:''}">
   <div class="form-grid">
     <div class="form-group"><label>Fecha *</label><input type="date" id="aeq-fecha" value="${new Date().toISOString().split('T')[0]}"></div>
-    <div class="form-group"><label>N° Colocación</label><input type="text" id="aeq-num" value="${esc(numColoc)}" ${numReadonly?'readonly style="background:var(--bg2)"':''} placeholder="1era Colocacion"></div>
+    <div class="form-group"><label>N° Colocación</label><input type="text" id="aeq-num" value="${esc(numColoc)}" title="Sugerido según el historial del paciente — puedes modificarlo" placeholder="1era Colocacion"></div>
     <div class="form-group"><label>Modo de uso</label>
       <select id="aeq-modo"><option value="Consulta">Consulta</option><option value="Domicilio">Domicilio</option><option value="Hospitalario">Hospitalario</option></select>
     </div>
