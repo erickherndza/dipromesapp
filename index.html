@@ -1743,7 +1743,11 @@ function abrirEditarColocacion(id){
   <div class="modal-title">Editar colocación — ${esc(reg.nombre)}</div>
   <div class="form-grid">
     <div class="form-group"><label>Fecha *</label><input type="date" id="ec2-fecha" value="${reg.fecha||''}"></div>
-    <div class="form-group"><label>N° Colocación</label><input type="text" id="ec2-num" value="${esc(reg.motivo)||''}" placeholder="1era Colocacion"></div>
+    <div class="form-group"><label>N° Colocación</label><input type="text" id="ec2-num" value="${esc(reg.motivo)||''}" placeholder="1era Colocacion" oninput="document.getElementById('ec2-nueva-wrap').style.display=(reg_motivoOriginal('${id}')&&this.value.trim()!==reg_motivoOriginal('${id}'))?'':'none'">
+      <label id="ec2-nueva-wrap" style="display:none;margin-top:6px;font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--info-t);background:var(--info-bg);padding:6px 8px;border-radius:6px;cursor:pointer">
+        <input type="checkbox" id="ec2-nueva" checked style="width:auto;margin-right:4px;vertical-align:middle">
+        Registrar como <b>nueva colocación</b> — la anterior (“${esc(reg.motivo)||''}”) queda guardada en el historial. Desmarca si solo corriges un error.
+      </label></div>
     <div class="form-group"><label>Máquina asignada</label>
       <select id="ec2-maq">
         <option value="">Sin máquina asignada</option>
@@ -1837,6 +1841,12 @@ async function guardarEditarColocacion(id){
     productos:getProductosFromList('ec2-productos-list'),
     fotos:getFotosFromPreview('ec2-foto-preview'),
   };
+  // Si cambió el N° de colocación y se pidió como nueva, se crea un registro nuevo
+  // y la colocación anterior se conserva en el historial (cerrada si estaba activa).
+  const motivoAnt=(reg.motivo||'').trim();
+  if(motivoAnt && cambios.motivo.trim()!==motivoAnt && document.getElementById('ec2-nueva')?.checked){
+    return guardarComoNuevaColocacion(reg,cambios);
+  }
   let actualizado;
   try{
     actualizado=await api.put('/registros/'+id,cambios);
@@ -1847,6 +1857,38 @@ async function guardarEditarColocacion(id){
   }catch(e){showToast('Error: '+e.message,true);return;}
   if(document.getElementById('ec2-gcal')?.checked){
     await sincronizarEventoCalendar(actualizado);
+  }
+  closeModal();
+  ({dashboard:renderDash,pacientes:renderPacientes,colocaciones:renderColocaciones,registro:renderRegistro,maquinas:renderMaquinas,facturacion:renderFacturacion})[VIEW]?.();
+}
+
+function reg_motivoOriginal(id){
+  return ((DB.registros.find(r=>r.id===id)||{}).motivo||'').trim();
+}
+
+async function guardarComoNuevaColocacion(reg,cambios){
+  const nuevo={
+    ...cambios,
+    nombre:reg.nombre,cedula:reg.cedula,sexo:reg.sexo,edad:reg.edad,tel2:reg.tel2,
+    lat:reg.lat,lng:reg.lng,notas_seguimiento:'',condicion_retorno:'',
+    // Fotos y productos pertenecen a la colocación anterior — la nueva empieza vacía
+    fotos:[],productos:[],
+  };
+  let creado;
+  try{
+    creado=await api.post('/registros',nuevo);
+    DB.registros.push(creado);
+    // La anterior queda en el historial; si seguía activa se cierra para no duplicar activos/máquina
+    if(reg.estatus==='Activo' && creado.estatus==='Activo'){
+      const cerrado=await api.put('/registros/'+reg.id,{estatus:'Desactivado',fecha_retiro:reg.fecha_retiro||creado.fecha});
+      const idx=DB.registros.findIndex(r=>r.id===reg.id);
+      if(idx>-1) DB.registros[idx]=cerrado;
+    }
+    recalcPacienteActual();
+    showToast(`Nueva colocación registrada (${creado.motivo}) — la anterior quedó en el historial`);
+  }catch(e){showToast('Error: '+e.message,true);return;}
+  if(creado.proxima_colocacion && document.getElementById('ec2-gcal')?.checked){
+    await sincronizarEventoCalendar(creado);
   }
   closeModal();
   ({dashboard:renderDash,pacientes:renderPacientes,colocaciones:renderColocaciones,registro:renderRegistro,maquinas:renderMaquinas,facturacion:renderFacturacion})[VIEW]?.();
