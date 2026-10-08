@@ -2832,28 +2832,25 @@ function crearFotoThumb(previewId, foto){
   wrap.appendChild(visual);
   wrap.appendChild(del);
   preview.appendChild(wrap);
+  return wrap;
 }
-async function addFotoPreview(input, previewId, driveCtx){
-  const files=Array.from(input.files);
-  const useDrive=driveCtx && document.getElementById(driveCtx.checkboxId)?.checked;
-  for(const file of files){
-    if(!file.type.startsWith('image/')) continue;
-    if(useDrive){
-      try{
-        const nombre=driveCtx.getNombre();
-        if(!nombre) throw new Error('Selecciona el paciente primero');
-        const folderId=await obtenerOCrearCarpetaDrivePaciente(nombre);
-        const driveObj=await subirFotoADrive(file, folderId);
-        crearFotoThumb(previewId, driveObj);
-      }catch(e){
-        showToast('Error subiendo a Drive: '+e.message, true);
-      }
-      continue;
-    }
+// Muestra la miniatura al instante (base64). Si la vista sube a Drive, lo hace al guardar
+// usando el File que queda en wrap._file (ver guardarSubirFotos).
+function addFotoPreview(input, previewId){
+  const preview=document.getElementById(previewId);if(!preview)return;
+  // Algunas fotos de iPhone (HEIC) llegan con file.type vacío: se aceptan por extensión
+  const esImagen=f=>f.type.startsWith('image/')||/\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(f.name);
+  const files=Array.from(input.files).filter(esImagen);
+  if(input.files.length&&!files.length) showToast('El archivo seleccionado no es una imagen', true);
+  files.forEach(file=>{
+    preview.dataset.pending=(+preview.dataset.pending||0)+1;
     const reader=new FileReader();
-    reader.onload=e=>crearFotoThumb(previewId, e.target.result);
+    reader.onload=e=>{const w=crearFotoThumb(previewId, e.target.result); if(w) w._file=file;};
+    reader.onerror=()=>showToast('No se pudo leer '+file.name, true);
+    reader.onloadend=()=>{preview.dataset.pending=(+preview.dataset.pending||1)-1;};
     reader.readAsDataURL(file);
-  }
+  });
+  input.value='';
 }
 function prefillFotoPreview(previewId, fotos){
   (fotos||[]).forEach(f=>crearFotoThumb(previewId, f));
@@ -2893,7 +2890,7 @@ function renderGaleriaFotos(fotos){
 // Google de la oficina; el access token vive solo en memoria, nunca se guarda.
 // ══════════════════════════════════════════════════════════════════════════════
 const GOOGLE_SCOPES='https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file';
-let _gTokenClient=null, _gAccessToken=null, _gTokenExpiresAt=0;
+let _gTokenClient=null, _gAccessToken=null, _gTokenExpiresAt=0, _gTokenPending=null, _gTokenResolve=null;
 
 function googleDisponible(){
   return !!(DB.googleClientId && window.google && google.accounts && google.accounts.oauth2);
@@ -2902,7 +2899,12 @@ function googleDisponible(){
 function ensureGoogleAuth(){
   if(!googleDisponible()) return Promise.resolve(null);
   if(_gAccessToken && Date.now()<_gTokenExpiresAt) return Promise.resolve(_gAccessToken);
-  return new Promise((resolve)=>{
+  // Una sola petición de token a la vez; el cliente se crea una vez, así que sus callbacks
+  // resuelven la petición pendiente actual (no la primera que lo creó)
+  if(_gTokenPending) return _gTokenPending;
+  _gTokenPending=new Promise((resolve)=>{
+    const done=v=>{_gTokenPending=null;resolve(v);};
+    _gTokenResolve=done;
     if(!_gTokenClient){
       _gTokenClient=google.accounts.oauth2.initTokenClient({
         client_id: DB.googleClientId,
@@ -2911,14 +2913,15 @@ function ensureGoogleAuth(){
           if(resp&&resp.access_token){
             _gAccessToken=resp.access_token;
             _gTokenExpiresAt=Date.now()+(parseInt(resp.expires_in||'3500',10)*1000)-30000;
-            resolve(_gAccessToken);
-          }else resolve(null);
+            _gTokenResolve(_gAccessToken);
+          }else _gTokenResolve(null);
         },
-        error_callback: ()=>resolve(null),
+        error_callback: ()=>_gTokenResolve(null),
       });
     }
     _gTokenClient.requestAccessToken();
   });
+  return _gTokenPending;
 }
 
 async function gFetch(url, opts={}){
@@ -3048,14 +3051,14 @@ function abrirSubirFotos(){
     </div>
     <div class="form-group span2">
       <label><i class="ti ti-camera" style="vertical-align:-2px"></i> Fotos</label>
-      <input type="file" id="sf-fotos" multiple accept="image/*" onchange="addFotoPreview(this,'sf-foto-preview',{checkboxId:'sf-drive',getNombre:()=>document.getElementById('sf-pac').value})" style="font-size:12px">
+      <input type="file" id="sf-fotos" multiple accept="image/*" onchange="addFotoPreview(this,'sf-foto-preview')" style="font-size:12px">
       ${googleDriveCheckboxHtml('sf-drive')}
       <div id="sf-foto-preview" class="foto-thumbs" style="margin-top:8px"></div>
       <div style="font-size:10px;color:var(--text3);margin-top:4px">Se agregan a las fotos que ya tenga esa colocación — no las reemplazan.</div>
     </div>
   </div>
   <div style="display:flex;gap:8px;margin-top:4px">
-    <button class="btn btn-primary" style="flex:1" onclick="guardarSubirFotos()"><i class="ti ti-device-floppy"></i>Guardar fotos</button>
+    <button class="btn btn-primary" style="flex:1" id="sf-guardar" onclick="guardarSubirFotos()"><i class="ti ti-device-floppy"></i>Guardar fotos</button>
     <button class="btn" onclick="closeModal()">Cancelar</button>
   </div>
 </div>
@@ -3076,16 +3079,36 @@ function onSfPacChange(){
 async function guardarSubirFotos(){
   const colId=document.getElementById('sf-col').value;
   if(!colId){alert('Selecciona el paciente y la colocación a la que pertenecen las fotos.');return;}
-  const nuevasFotos=getFotosFromPreview('sf-foto-preview');
-  if(!nuevasFotos.length){alert('Selecciona al menos una foto.');return;}
+  const preview=document.getElementById('sf-foto-preview');
+  if(+preview.dataset.pending>0){showToast('Todavía se están cargando las fotos, espera un momento.', true);return;}
+  const wraps=Array.from(preview.querySelectorAll('.foto-thumb-wrap'));
+  if(!wraps.length){alert('Selecciona al menos una foto.');return;}
   const reg=DB.registros.find(r=>r.id===colId);if(!reg)return;
+  const btn=document.getElementById('sf-guardar');
+  const nuevasFotos=wraps.map(w=>JSON.parse(w.dataset.raw));
+  if(document.getElementById('sf-drive')?.checked && wraps.some(w=>w._file)){
+    // Se pide el token primero, dentro del clic, para que el navegador no bloquee el popup de Google
+    const tokenP=ensureGoogleAuth();
+    btn.disabled=true; btn.innerHTML='<i class="ti ti-loader"></i>Subiendo a Drive...';
+    let fallidas=0;
+    try{
+      if(!await tokenP) throw new Error('No se pudo autenticar con Google');
+      const folderId=await obtenerOCrearCarpetaDrivePaciente(reg.nombre);
+      for(let i=0;i<wraps.length;i++){
+        if(!wraps[i]._file) continue;
+        try{ nuevasFotos[i]=await subirFotoADrive(wraps[i]._file, folderId); }
+        catch(e){ fallidas++; }
+      }
+    }catch(e){ fallidas=wraps.length; }
+    if(fallidas) showToast(`${fallidas} foto(s) no se pudieron subir a Drive — se guardan en el sistema.`, true);
+  }
   const fotos=[...(reg.fotos||[]),...nuevasFotos];
   try{
     const actualizado=await api.put('/registros/'+colId,{fotos});
     const idx=DB.registros.findIndex(r=>r.id===colId);
     if(idx>-1) DB.registros[idx]=actualizado;
     showToast('Fotos agregadas a la colocación');
-  }catch(e){showToast('Error: '+e.message,true);return;}
+  }catch(e){showToast('Error: '+e.message,true);btn.disabled=false;btn.innerHTML='<i class="ti ti-device-floppy"></i>Guardar fotos';return;}
   closeModal();
 }
 
