@@ -3373,7 +3373,7 @@ function renderUsuarios(){
           <td><code style="background:var(--bg2);padding:2px 6px;border-radius:4px;font-size:12px">${u.user}</code></td>
           <td style="font-weight:500">${u.nombre}</td>
           <td>${u.rol==='admin'?`<span class="badge badge-brand">Admin</span>`:`<span class="badge badge-info">Usuario</span>`}</td>
-          <td>${u.activo!==false?`<span class="badge badge-ok">Activo</span>`:`<span class="badge badge-gray">Inactivo</span>`}</td>
+          <td>${u.activo!==false?`<span class="badge badge-ok">Activo</span>`:`<span class="badge badge-gray">Inactivo</span>`}${u.requiere_nueva_pass?` <span class="badge badge-danger" title="Su contraseña viene de Render en un formato que este servidor no puede verificar — edítalo y asígnale una nueva">Requiere nueva contraseña</span>`:''}</td>
           <td>
             <div style="display:flex;gap:4px">
               <button class="btn btn-sm btn-ghost" onclick="editarUsuario('${u.id}')" title="Editar"><i class="ti ti-pencil"></i></button>

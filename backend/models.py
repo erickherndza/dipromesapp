@@ -1,3 +1,4 @@
+import hashlib
 import json
 from flask_sqlalchemy import SQLAlchemy
 
@@ -97,6 +98,12 @@ class Registro(db.Model):
 
 class Usuario(db.Model):
     __tablename__ = 'usuarios'
+
+    def pass_hash_no_soportado(self):
+        # Hashes scrypt (de usuarios importados de Render) no se pueden verificar en un
+        # Python sin hashlib.scrypt (Banahosting): el admin debe asignarles una contraseña nueva
+        return (self.pass_ or '').startswith('scrypt:') and not hasattr(hashlib, 'scrypt')
+
     id = db.Column(db.String(10), primary_key=True)
     user = db.Column(db.String(50), unique=True, nullable=False)
     pass_ = db.Column('pass', db.Text, nullable=False)
@@ -113,6 +120,7 @@ class Usuario(db.Model):
             'email': self.email or '',
             'rol': self.rol,
             'activo': self.activo,
+            'requiere_nueva_pass': self.pass_hash_no_soportado(),
         }
         if include_pass:
             d['pass'] = self.pass_

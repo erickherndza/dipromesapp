@@ -169,6 +169,8 @@ def auth_login():
         return jsonify({"ok": False}), 401
 
     provided = d.get("pass", "")
+    if u.pass_hash_no_soportado():
+        return jsonify({"ok": False, "error": "Tu contraseña debe ser restablecida por un administrador."}), 401
     if _is_hashed(u.pass_):
         valid = check_password_hash(u.pass_, provided)
     else:
