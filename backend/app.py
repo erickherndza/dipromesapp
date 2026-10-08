@@ -7,6 +7,7 @@ import random
 from datetime import timedelta
 from email.mime.text import MIMEText
 from functools import wraps
+from urllib.parse import unquote
 
 from flask import Flask, g, request, jsonify, send_from_directory, Response, session
 from flask_cors import CORS
@@ -392,9 +393,16 @@ def delete_registro(id):
 
 # ─── Pacientes (bulk operations) ─────────────────────────────────────────────
 
+def _nombre_url(nombre):
+    # Passenger (Banahosting) entrega PATH_INFO sin decodificar: "Angel%20Sarante".
+    # Con Gunicorn/Render ya llega decodificado y unquote no cambia nada.
+    return unquote(nombre)
+
+
 @app.route("/api/pacientes/<path:nombre>", methods=["DELETE"])
 @login_required
 def delete_paciente(nombre):
+    nombre = _nombre_url(nombre)
     Registro.query.filter_by(nombre=nombre).delete()
     pm = PacienteMaster.query.get(nombre)
     if pm:
@@ -406,6 +414,7 @@ def delete_paciente(nombre):
 @app.route("/api/pacientes/<path:nombre>/retiro", methods=["POST"])
 @login_required
 def retiro_paciente(nombre):
+    nombre = _nombre_url(nombre)
     d = request.json or {}
     nuevo_estatus = d.get("estatus") if d.get("estatus") in ("Suspendido", "Desactivado") else "Desactivado"
     activos = Registro.query.filter_by(nombre=nombre, estatus="Activo").all()
@@ -438,6 +447,7 @@ def get_pacientes_master():
 @app.route("/api/pacientes-master/<path:nombre>", methods=["PUT"])
 @login_required
 def update_paciente_master(nombre):
+    nombre = _nombre_url(nombre)
     d = request.json or {}
     nuevo_nombre = d.get("nombre", nombre)
 
@@ -920,8 +930,32 @@ def apply_migrations():
             conn.commit()
         except Exception:
             conn.rollback()  # Column already exists
+    _arreglar_pacientes_master_codificados()
     # Ensure required users exist (safe: no-op if already present)
     _ensure_user("feli", "Dr. Félix", _FELI_PASS, "usuario")
+
+
+def _arreglar_pacientes_master_codificados():
+    # Perfiles guardados con el nombre URL-codificado ("Reiginald%20Destin") antes del fix de
+    # _nombre_url: se fusionan en el perfil con el nombre real. Idempotente.
+    try:
+        for pm in PacienteMaster.query.filter(PacienteMaster.nombre.contains("%", autoescape=True)).all():
+            real = unquote(pm.nombre)
+            if real == pm.nombre:
+                continue
+            datos = json.loads(pm.datos or "{}")
+            datos.pop("nombre", None)
+            destino = PacienteMaster.query.get(real)
+            if destino:
+                merged = json.loads(destino.datos or "{}")
+                merged.update(datos)
+                destino.datos = json.dumps(merged)
+            else:
+                db.session.add(PacienteMaster(nombre=real, datos=json.dumps(datos)))
+            db.session.delete(pm)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _ensure_user(username, nombre, password, rol="usuario"):
