@@ -621,7 +621,7 @@ const fmt=v=>new Intl.NumberFormat('es-DO',{style:'currency',currency:'DOP',mini
 const fmtD=d=>d?new Date(d+'T00:00:00').toLocaleDateString('es-DO',{day:'2-digit',month:'short',year:'numeric'}):'—';
 const initials=n=>n.split(' ').filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join('');
 function stBadge(s){
-  const m={'Activo':'ok','Desactivado':'gray','Operativa':'ok','Requiere Revisión':'warn','Sin registrar':'danger','Fuera de Servicio':'danger','Activa con paciente':'ok'};
+  const m={'Activo':'ok','Desactivado':'gray','Suspendido':'warn','Operativa':'ok','Requiere Revisión':'warn','Sin registrar':'danger','Fuera de Servicio':'danger','Activa con paciente':'ok'};
   return`<span class="badge badge-${m[s]||'gray'}">${s}</span>`;
 }
 // Estado de saldo de una colocación: rojo = tiene saldo pendiente, azul = sin saldo pendiente
@@ -658,12 +658,16 @@ function getPacientesUnicos(){
     }
     map[r.nombre].colocaciones.push(r);
     map[r.nombre].total_facturado+=(r.facturacion||0);
-    if(r.estatus==='Activo') map[r.nombre].estatus='Activo';
     // Actualiza datos con la entrada más reciente
     if(r.fecha > map[r.nombre].fecha){
       map[r.nombre].maquina=r.maquina;
       map[r.nombre].motivo=r.motivo;
     }
+  });
+  // Estatus del paciente: Activo si tiene alguna colocación activa; si no, el de su colocación más reciente (Suspendido / Desactivado)
+  Object.values(map).forEach(p=>{
+    const ult=p.colocaciones.reduce((a,b)=>(b.fecha||'')>(a.fecha||'')?b:a);
+    p.estatus=p.colocaciones.some(r=>r.estatus==='Activo')?'Activo':ult.estatus;
   });
   // Aplicar ediciones del perfil maestro
   Object.keys(map).forEach(nombre=>{
@@ -806,7 +810,7 @@ function renderPacientes(){
     <input type="text" placeholder="Buscar por nombre, cédula, teléfono..." id="srch-pac" oninput="filterPacientes()">
     <select id="fil-est-pac" onchange="filterPacientes()">
       <option value="">Todos los estados</option>
-      <option>Activo</option><option>Desactivado</option>
+      <option>Activo</option><option>Suspendido</option><option>Desactivado</option>
     </select>
   </div>
   <table class="tbl">
@@ -897,13 +901,13 @@ function verPacienteDetalle(nombre){
           const hoy=new Date().toISOString().split('T')[0];
           const proxAlerta=prox&&prox<=new Date(Date.now()+7*86400000).toISOString().split('T')[0];
           const proxVal=prox?`${fmtD(prox)}${proxAlerta?` <span class="badge badge-warn" style="font-size:10px">Próxima</span>`:''}`:'—';
-          return [['Fecha',fmtD(p.fecha)],['Colocación',p.motivo||'—'],['Máquina asignada',getMaquinaLabel(p.maquina)],['Estado',p.estatus],['Próxima visita',proxVal],['Conduce',fmt(p.facturacion||0)],['Total acumulado',fmt(p.total_facturado)]].map(([l,v])=>`
+          return [['Fecha',fmtD(p.fecha)],['Colocación',p.motivo||'—'],['Máquina asignada',p.estatus==='Activo'?getMaquinaLabel(p.maquina):'Sin equipo'],['Estado',p.estatus],['Próxima visita',proxVal],['Conduce',fmt(p.facturacion||0)],['Total acumulado',fmt(p.total_facturado)]].map(([l,v])=>`
         <div class="info-row"><span class="info-label">${l}</span><span class="info-val">${v}</span></div>`).join('');
         })()}
         <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
           <button class="btn btn-primary btn-sm" onclick="closeModal();abrirAsignarEquipo('${p.nombre.replace(/'/g,"\\'")}')"><i class="ti ti-device-laptop-medical"></i>Asignar equipo</button>
           <button class="btn btn-sm" onclick="closeModal();editarPaciente('${p.nombre.replace(/'/g,"\\'")}')"><i class="ti ti-pencil"></i>Editar perfil</button>
-          ${p.estatus==='Activo'?`<button class="btn btn-danger btn-sm" onclick="desactivarPaciente('${p.nombre.replace(/'/g,"\\'")}')"><i class="ti ti-player-stop"></i>Retirar equipo</button>`:`<button class="btn btn-ok btn-sm" onclick="closeModal();abrirAsignarEquipo('${p.nombre.replace(/'/g,"\\'")}')"><i class="ti ti-player-play"></i>Nueva colocación</button>`}
+          ${p.estatus==='Activo'?`<button class="btn btn-danger btn-sm" onclick="desactivarPaciente('${p.nombre.replace(/'/g,"\\'")}')"><i class="ti ti-player-stop"></i>Retirar / suspender</button>`:`<button class="btn btn-ok btn-sm" onclick="closeModal();abrirAsignarEquipo('${p.nombre.replace(/'/g,"\\'")}')"><i class="ti ti-player-play"></i>Nueva colocación</button>`}
           <button class="btn btn-danger btn-sm" onclick="confirmarEliminarPaciente('${p.nombre.replace(/'/g,"\\'")}')"><i class="ti ti-trash"></i>Eliminar paciente</button>
         </div>
       </div>
@@ -1075,7 +1079,7 @@ function renderRegistro(){
   <div class="search-bar">
     <input type="text" placeholder="Buscar nombre, cédula, motivo..." id="srch-reg" oninput="filterRegistro()">
     <select id="fil-est-reg" onchange="filterRegistro()">
-      <option value="">Todos</option><option>Activo</option><option>Desactivado</option>
+      <option value="">Todos</option><option>Activo</option><option>Suspendido</option><option>Desactivado</option>
     </select>
     <select id="fil-mes-reg" onchange="filterRegistro()">
       <option value="">Todos los meses</option>
@@ -1787,6 +1791,7 @@ function abrirEditarColocacion(id){
     <div class="form-group"><label>Estado</label>
       <select id="ec2-estatus">
         <option value="Activo" ${reg.estatus==='Activo'?'selected':''}>Activo</option>
+        <option value="Suspendido" ${reg.estatus==='Suspendido'?'selected':''}>Suspendido</option>
         <option value="Desactivado" ${reg.estatus==='Desactivado'?'selected':''}>Desactivado</option>
       </select>
     </div>
@@ -2041,6 +2046,12 @@ function desactivarPaciente(nombre){
         <option value="Dañado">Dañado — Fuera de servicio</option>
       </select>
     </div>
+    <div class="form-group span2"><label>Estado del paciente tras el retiro</label>
+      <select id="ret-estatus">
+        <option value="Suspendido">Suspendido — se retira el equipo, puede reanudar luego</option>
+        <option value="Desactivado">Desactivado — tratamiento finalizado</option>
+      </select>
+    </div>
     <div class="form-group span2"><label>Observaciones del retiro</label>
       <textarea id="ret-obs" placeholder="Estado del paciente, motivo del retiro, incidencias con el equipo..."></textarea>
     </div>
@@ -2057,10 +2068,11 @@ async function confirmarRetiro(nombre){
   const fecha=document.getElementById('ret-fecha').value;
   const cond=document.getElementById('ret-cond').value;
   const obs=document.getElementById('ret-obs').value;
+  const estatus=document.getElementById('ret-estatus').value;
   try{
-    await api.post('/pacientes/'+encodeURIComponent(nombre)+'/retiro',{fecha,cond,obs});
+    await api.post('/pacientes/'+encodeURIComponent(nombre)+'/retiro',{fecha,cond,obs,estatus});
     await initDB();
-    showToast('Equipo retirado');
+    showToast(estatus==='Suspendido'?'Paciente suspendido — equipo liberado':'Equipo retirado');
   }catch(e){showToast('Error: '+e.message,true);return;}
   closeModal();
   ({dashboard:renderDash,pacientes:renderPacientes,colocaciones:renderColocaciones,registro:renderRegistro,maquinas:renderMaquinas})[VIEW]?.();

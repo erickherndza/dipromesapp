@@ -405,9 +405,10 @@ def delete_paciente(nombre):
 @login_required
 def retiro_paciente(nombre):
     d = request.json or {}
+    nuevo_estatus = d.get("estatus") if d.get("estatus") in ("Suspendido", "Desactivado") else "Desactivado"
     activos = Registro.query.filter_by(nombre=nombre, estatus="Activo").all()
     for r in activos:
-        r.estatus = "Desactivado"
+        r.estatus = nuevo_estatus
         r.fecha_retiro = d.get("fecha")
         r.condicion_retorno = d.get("cond", "")
         r.observaciones_retiro = d.get("obs", "")
