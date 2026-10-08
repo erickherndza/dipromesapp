@@ -90,6 +90,14 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg3);color:var
 .badge-pagado{background:var(--info-bg);color:var(--info-t)}
 .badge-nopagado{background:var(--danger-bg);color:var(--danger-t)}
 .badge-brand{background:var(--brand-dim2);color:var(--brand)}
+/* Etapa de la colocación (N° 1era, 2da…): color por número, ver etapaBadge() */
+.etapa-0{background:var(--bg2);color:var(--text2)}
+.etapa-1{background:#e0f2fe;color:#0369a1}
+.etapa-2{background:#ccfbf1;color:#0f766e}
+.etapa-3{background:#dcfce7;color:#15803d}
+.etapa-4{background:#fef3c7;color:#b45309}
+.etapa-5{background:#ffedd5;color:#c2410c}
+.etapa-6{background:#f3e8ff;color:#7e22ce}
 
 /* ── MODALES ── */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px}
@@ -640,6 +648,17 @@ function stBadge(s){
   const m={'Activo':'ok','Desactivado':'gray','Suspendido':'warn','Operativa':'ok','Requiere Revisión':'warn','Sin registrar':'danger','Fuera de Servicio':'danger','Activa con paciente':'ok'};
   return`<span class="badge badge-${m[s]||'gray'}">${s}</span>`;
 }
+// Etapa de una colocación según su N° ("1era Colocacion" → 1, "11ª" → 11); 0 si no trae número
+function etapaColocacion(motivo){
+  const m=String(motivo||'').match(/(\d+)\s*(?:era|ra|da|ta|ma|va|na|ª|º|°)/i);
+  return m?parseInt(m[1],10):0;
+}
+// Badge con color por etapa: 1 azul, 2 turquesa, 3 verde, 4 ámbar, 5 naranja, 6+ morado
+function etapaBadge(motivo){
+  if(!motivo) return '—';
+  const n=etapaColocacion(motivo);
+  return `<span class="badge etapa-${Math.min(n,6)}" title="${n?'Etapa '+n:'Sin número de colocación'}">${esc(motivo)}</span>`;
+}
 // Estado de saldo de una colocación: rojo = tiene saldo pendiente, azul = sin saldo pendiente
 function estadoPago(r){
   const fact=r.facturacion||0, saldo=r.saldo_pendiente||0;
@@ -917,7 +936,7 @@ function verPacienteDetalle(nombre){
           const hoy=new Date().toISOString().split('T')[0];
           const proxAlerta=prox&&prox<=new Date(Date.now()+7*86400000).toISOString().split('T')[0];
           const proxVal=prox?`${fmtD(prox)}${proxAlerta?` <span class="badge badge-warn" style="font-size:10px">Próxima</span>`:''}`:'—';
-          return [['Fecha',fmtD(p.fecha)],['Colocación',p.motivo||'—'],['Máquina asignada',p.estatus==='Activo'?getMaquinaLabel(p.maquina):'Sin equipo'],['Estado',p.estatus],['Próxima visita',proxVal],['Conduce',fmt(p.facturacion||0)],['Total acumulado',fmt(p.total_facturado)]].map(([l,v])=>`
+          return [['Fecha',fmtD(p.fecha)],['Colocación',etapaBadge(p.motivo)],['Máquina asignada',p.estatus==='Activo'?getMaquinaLabel(p.maquina):'Sin equipo'],['Estado',p.estatus],['Próxima visita',proxVal],['Conduce',fmt(p.facturacion||0)],['Total acumulado',fmt(p.total_facturado)]].map(([l,v])=>`
         <div class="info-row"><span class="info-label">${l}</span><span class="info-val">${v}</span></div>`).join('');
         })()}
         <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
@@ -937,7 +956,7 @@ function verPacienteDetalle(nombre){
         ${colocaciones.map(c=>`
         <tr>
           <td style="font-size:12px;white-space:nowrap">${fmtD(c.fecha)}</td>
-          <td>${c.motivo||'—'}${c.notas?` <span title="${c.notas.replace(/"/g,'&quot;')}" style="cursor:help">💬</span>`:''}</td>
+          <td>${etapaBadge(c.motivo)}${c.notas?` <span title="${c.notas.replace(/"/g,'&quot;')}" style="cursor:help">💬</span>`:''}</td>
           <td>${getMaquinaLabel(c.maquina)||'—'}</td>
           <td style="font-size:11px">${c.modo_uso||'—'}</td>
           <td>${c.condicion_salida?condBadge(c.condicion_salida):'<span style="color:var(--text3)">—</span>'}</td>
@@ -1001,7 +1020,7 @@ function filterColocaciones(){
         </div>
       </td>
       <td>${m?`<span class="badge badge-brand">${esc(m.nombre)}</span>`:'<span class="badge badge-gray">Sin equipo</span>'}</td>
-      <td style="font-size:12px">${esc(r.motivo)||'—'}</td>
+      <td style="font-size:12px">${etapaBadge(r.motivo)}</td>
       <td style="font-size:12px;white-space:nowrap">${fmtD(r.fecha)}</td>
       <td style="font-size:12px;white-space:nowrap">${r.fecha_retiro?fmtD(r.fecha_retiro):'<span style="color:var(--ok-t);font-weight:600">En uso</span>'}</td>
       <td><span class="badge badge-gray" style="font-size:10px">${esc(r.ars)||'—'}</span></td>
@@ -1130,7 +1149,7 @@ function filterRegistro(){
     <td style="font-size:12px">${r.tel1||'—'}</td>
     <td>${r.maquina?`<span class="badge badge-brand" style="font-size:10px">${getMaquinaLabel(r.maquina)}</span>`:'<span style="color:var(--text3);font-size:12px">—</span>'}</td>
     <td>${stBadge(r.estatus)}</td>
-    <td style="font-size:12px;color:var(--text2);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.notas||'').replace(/"/g,'&quot;')}">${r.motivo||'—'}${r.notas?` <span style="cursor:help">💬</span>`:''}</td>
+    <td style="font-size:12px;color:var(--text2);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.notas||'').replace(/"/g,'&quot;')}">${etapaBadge(r.motivo)}${r.notas?` <span style="cursor:help">💬</span>`:''}</td>
     <td style="font-weight:600;white-space:nowrap">${montoPago(r)}</td>
     <td style="white-space:nowrap">
       <button class="btn btn-sm btn-ghost" title="Editar colocación" onclick="event.stopPropagation();abrirEditarColocacion('${r.id}')"><i class="ti ti-pencil"></i></button>
@@ -1453,7 +1472,7 @@ function renderFacturacion(){
           ${r.nombre}
         </span>
       </td>
-      <td style="font-size:12px;color:var(--text-light)">${r.motivo||'—'}</td>
+      <td style="font-size:12px;color:var(--text-light)">${etapaBadge(r.motivo)}</td>
       <td style="text-align:right;font-weight:700;font-size:13px;color:${saldo>0?'var(--danger)':'var(--info)'}">${fmt(r.facturacion)}</td>
       <td style="text-align:right">
         ${saldo>0
