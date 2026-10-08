@@ -270,10 +270,26 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg3);color:var
 const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
 function _handleUnauth(){
+  const estabaDentro=!!sessionStorage.getItem('meditrack_session');
   sessionStorage.removeItem('meditrack_session');
+  document.getElementById('modal-root').innerHTML='';
+  const err=document.getElementById('login-error');
+  if(estabaDentro){
+    err.textContent='Tu sesión expiró. Inicia sesión de nuevo y repite la última acción — no se guardó.';
+    err.style.display='';
+  }
   document.getElementById('login-screen').style.display='flex';
   document.querySelector('.app').style.display='none';
 }
+// Al volver a una pestaña que estuvo inactiva, comprobar que la sesión del servidor sigue viva
+// (vence a las 8 h sin actividad) antes de que el usuario intente guardar algo.
+let _ultimaVerifSesion=Date.now();
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible'||!sessionStorage.getItem('meditrack_session')) return;
+  if(Date.now()-_ultimaVerifSesion<5*60*1000) return;
+  _ultimaVerifSesion=Date.now();
+  api.get('/config/ars').catch(()=>{});
+});
 
 const API_BASE = location.pathname.replace(/\/(index\.html)?$/, '');
 const api = {
@@ -3290,14 +3306,15 @@ async function login(){
   const pass=document.getElementById('login-pass').value;
   try{
     const found=await api.post('/auth/login',{user,pass});
-    if(!found.ok){document.getElementById('login-error').style.display='';return;}
+    if(!found.ok){const e=document.getElementById('login-error');e.textContent='Usuario o contraseña incorrectos.';e.style.display='';return;}
+    document.getElementById('login-error').style.display='none';
     sessionStorage.setItem('meditrack_session',JSON.stringify({user:found.user,nombre:found.nombre,rol:found.rol}));
     document.getElementById('login-screen').style.display='none';
     document.querySelector('.app').style.display='flex';
     mostrarTopbarUsuario(found.nombre,found.rol);
     await initDB();
     go('dashboard');
-  }catch(e){document.getElementById('login-error').style.display='';}
+  }catch(e){const el=document.getElementById('login-error');el.textContent='Usuario o contraseña incorrectos.';el.style.display='';}
 }
 
 async function logout(){
